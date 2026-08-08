@@ -6,12 +6,26 @@
   "description": "QuickBooks Online as agent tools, via Intuit's OFFICIAL MCP server (github.com/intuit/quickbooks-online-mcp-server, Apache-2.0), pinned to commit 099351858ee696dbbeb00dc7ca8e3a86276d86bb. A thin HTTP bridge adapts its stdio MCP transport to Eesa's stateless JSON-RPC. Ships READ-ONLY by default: QUICKBOOKS_DISABLE_WRITE/UPDATE/DELETE are set, so the container cannot create, update or delete anything in QuickBooks regardless of what is asked of it.",
   "icon": "",
   "hostedBy": "self",
-  "developer": { "name": "ZANYANBU", "email": "team@eesa.ai" },
+  "developer": {
+    "name": "ZANYANBU",
+    "email": "team@eesa.ai"
+  },
   "auth": {
     "verify": "bearer",
     "signingSecretEnv": "GATEWAY_TOKEN",
     "gatewayOnly": true
   },
-  "scopes": ["quickbooks:read"],
-  "health": { "liveness": "/health", "readiness": "/health/token" }
+  "scopes": [
+    "quickbooks:read"
+  ],
+  "health": {
+    "liveness": "/health",
+    "readiness": "/health/token"
+  },
+  "volumes": [
+    {
+      "mountPath": "/data",
+      "name": "qb-token"
+    }
+  ]
 }
