@@ -2,8 +2,8 @@
   "manifestVersion": "1.0",
   "slug": "quickbooks",
   "name": "QuickBooks Online",
-  "version": "1.0.0",
-  "description": "QuickBooks Online as agent tools, via Intuit's OFFICIAL MCP server (github.com/intuit/quickbooks-online-mcp-server, Apache-2.0), pinned to commit 099351858ee696dbbeb00dc7ca8e3a86276d86bb. A thin HTTP bridge adapts its stdio MCP transport to Eesa's stateless JSON-RPC. Ships READ-ONLY by default: QUICKBOOKS_DISABLE_WRITE/UPDATE/DELETE are set, so the container cannot create, update or delete anything in QuickBooks regardless of what is asked of it.",
+  "version": "1.1.0",
+  "description": "QuickBooks Online as agent tools, via Intuit's OFFICIAL MCP server (github.com/intuit/quickbooks-online-mcp-server, Apache-2.0), pinned to commit 099351858ee696dbbeb00dc7ca8e3a86276d86bb. A thin HTTP bridge adapts its stdio MCP transport to Eesa's stateless JSON-RPC. QUICKBOOKS_DISABLE_WRITE/UPDATE/DELETE decide the tool surface at container start: a disabled verb is never registered, so it cannot be called however it is asked for. Read-only is 70 tools. This deployment currently runs with write and update ENABLED (121 tools) so the Chups month-end sync can post journal entries; delete stays disabled.",
   "icon": "",
   "hostedBy": "self",
   "developer": {
@@ -16,7 +16,8 @@
     "gatewayOnly": true
   },
   "scopes": [
-    "quickbooks:read"
+    "quickbooks:read",
+    "quickbooks:write"
   ],
   "health": {
     "liveness": "/health",

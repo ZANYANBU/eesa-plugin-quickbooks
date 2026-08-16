@@ -13,18 +13,34 @@ Eesa's `MCPClient` speaks stateless JSON-RPC over HTTP POST
 Intuit's server speaks stdio MCP. `gateway/gateway.mjs` holds one persistent
 stdio session and maps `tools/list` and `tools/call` onto it.
 
-## Read-only by default
+## Write posture — currently WRITE + UPDATE enabled
 
 `QUICKBOOKS_DISABLE_WRITE`, `QUICKBOOKS_DISABLE_UPDATE` and
-`QUICKBOOKS_DISABLE_DELETE` are set, so Intuit's server never registers the
-`create_*`, `update_*` or `delete_*` tools at all.
+`QUICKBOOKS_DISABLE_DELETE` decide the tool surface at container start. Intuit's
+server never *registers* a disabled verb, so it cannot be called however it is
+asked for. All three on is 70 read-only tools; write and update on is 121.
 
-This is deliberate defence in depth. Eesa *also* gates QuickBooks writes behind
-a four-eyes approval that binds even admins — but that gate is code, and code
-has bugs. With these flags the container is physically incapable of mutating
-QuickBooks, so a gating bug cannot become a wrong journal entry. Unset them only
-when posting is actually being turned on, deliberately, in a single commit that
-says so.
+This is defence in depth, and it is the reason the flags exist. Eesa *also*
+gates QuickBooks writes behind a four-eyes approval that binds even admins — but
+that gate is code, and code has bugs. With a flag set the container is
+physically incapable of that mutation, so a gating bug cannot become a wrong
+journal entry.
+
+**As deployed today: write and update are ON, delete is OFF.** They were turned
+on so the Chups month-end sync (`manage.py qb_post_month`) can post and revise
+journal entries, and they are pointed at the **sandbox** realm, not Chups Inc's
+real books. Delete has never been enabled and there is no reason to enable it —
+nothing in the sync removes anything.
+
+To put it back to read-only, set `QUICKBOOKS_DISABLE_WRITE=true` and
+`QUICKBOOKS_DISABLE_UPDATE=true` on the *production* (`is_preview: false`) env
+rows in Coolify and redeploy. Note the deploy rebuilds the whole image (~6 min,
+it recompiles Intuit's server from source) and the container only swaps at the
+very end — a tool count read mid-deploy is the *old* container's answer.
+
+If you change these flags, change this section and `manifest.json` in the same
+commit. A manifest that claims read-only while the container can post is worse
+than no manifest.
 
 ## The token problem — read this before changing anything
 
@@ -63,7 +79,7 @@ current.
 | `QUICKBOOKS_REFRESH_TOKEN` | Bootstrap only — the token store takes over after the first refresh |
 | `QUICKBOOKS_REALM_ID` | The company. A sandbox realm with a production environment is a 401 that looks like a credential problem. |
 | `QUICKBOOKS_ENVIRONMENT` | `sandbox` or `production` — must match the realm |
-| `QUICKBOOKS_DISABLE_WRITE/UPDATE/DELETE` | `true` unless posting is being turned on |
+| `QUICKBOOKS_DISABLE_WRITE/UPDATE/DELETE` | Currently `false`/`false`/`true` — see *Write posture*. Keep DELETE `true`. |
 | `GATEWAY_TOKEN` | Shared secret Eesa presents as `Authorization: Bearer` |
 | `QB_TOKEN_STORE` | Default `/data/qb-token.json`. Must be on a volume. |
 | `GATEWAY_PORT` | Default `8080` |
