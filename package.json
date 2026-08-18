@@ -1,0 +1,32 @@
+{
+  "name": "eesa-plugin-quickbooks",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "QuickBooks Online as agent tools for Eesa — every tool from Intuit's official MCP server, re-hosted multi-tenant behind Eesa's JWKS auth. Per-tenant credentials come from Eesa's connections broker; the plugin stores only who may use it.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/*.test.js",
+    "schema": "psql \"$DATABASE_URL\" -f db/schema.sql"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "jose": "^5.9.6",
+    "node-quickbooks": "^2.0.46",
+    "pg": "^8.13.1",
+    "zod": "^3.24.2",
+    "zod-to-json-schema": "^3.24.1"
+  },
+  "overrides": {
+    "node-quickbooks": {
+      "fast-xml-parser": "^5.10.1",
+      "underscore": "^1.13.8",
+      "uuid": "11.1.1"
+    }
+  }
+}

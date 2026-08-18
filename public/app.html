@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QuickBooks</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #14171a; --muted: #5b6672; --line: #e4e8ec;
+    --card: #f7f9fa; --ok: #0a7d4b; --ok-bg: #e6f5ee;
+    --warn: #8a5a00; --warn-bg: #fdf3e0; --bad: #a3202b; --bad-bg: #fdeaec;
+    --accent: #1f6feb; --accent-fg: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171a; --fg: #e9edf1; --muted: #97a3ae; --line: #262c33;
+      --card: #1b1f24; --ok: #4ecb8d; --ok-bg: #10261c;
+      --warn: #e0a94a; --warn-bg: #2a2113; --bad: #f08c96; --bad-bg: #2b1518;
+      --accent: #6fa4ff; --accent-fg: #10151c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; background: var(--bg); color: var(--fg);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 26px 0 10px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .row { display: flex; align-items: baseline; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .row dt { flex: 0 0 150px; color: var(--muted); margin: 0; }
+  .row dd { margin: 0; flex: 1; word-break: break-word; }
+  dl { margin: 0; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12.5px; font-weight: 600; }
+  .pill.ok { background: var(--ok-bg); color: var(--ok); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn); }
+  .pill.bad { background: var(--bad-bg); color: var(--bad); }
+  .pill.mute { background: var(--line); color: var(--muted); }
+  a { color: var(--accent); }
+  .note { color: var(--muted); font-size: 13.5px; margin-top: 10px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 20px; }
+  .tab {
+    padding: 9px 15px; border: 0; background: none; color: var(--muted); cursor: pointer;
+    font: inherit; font-weight: 600; font-size: 14px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+  .counts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .count { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+  .count b { display: block; font-size: 19px; }
+  .count span { color: var(--muted); font-size: 12.5px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 600; }
+  td code { font-size: 12.5px; }
+  .scroll { max-height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+  .wrap { overflow-x: auto; }
+  input[type=search], select {
+    padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--fg); font: inherit; font-size: 14px;
+  }
+  input[type=search] { width: 100%; margin-bottom: 10px; }
+  select { min-width: 132px; }
+  .who { font-weight: 600; }
+  .who small { display: block; font-weight: 400; color: var(--muted); font-size: 12.5px; }
+  .saved { color: var(--ok); font-size: 12.5px; }
+  .failed { color: var(--bad); font-size: 12.5px; }
+  .banner { border-radius: 10px; padding: 12px 14px; margin-bottom: 16px; font-size: 14px; }
+  .banner.warn { background: var(--warn-bg); color: var(--warn); }
+  .banner.bad { background: var(--bad-bg); color: var(--bad); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<h1>QuickBooks Online</h1>
+<p class="sub" id="sub">Loading…</p>
+
+<div id="error" class="card" hidden></div>
+
+<div id="body" hidden>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" data-panel="overview" aria-selected="true">Overview</button>
+    <button class="tab" role="tab" data-panel="permissions" aria-selected="false" id="tabPermissions" hidden>Permissions</button>
+    <button class="tab" role="tab" data-panel="tools" aria-selected="false">Tools</button>
+  </div>
+
+  <!-- ---- Overview ---- -->
+  <section data-panel="overview">
+    <div class="card"><dl id="status"></dl></div>
+    <h2>What the agent can do</h2>
+    <div class="counts" id="counts"></div>
+    <p class="note" id="writeNote"></p>
+  </section>
+
+  <!-- ---- Permissions ---- -->
+  <section data-panel="permissions" hidden>
+    <div id="permBanner"></div>
+    <p class="note" style="margin-top:0">
+      Choose who in this workspace can use QuickBooks through Eesa.
+      <b>Reader</b> can ask about invoices, bills, contacts and reports.
+      <b>Admin</b> can also let the agent create, update and delete records, and can change this page.
+    </p>
+    <input type="search" id="permFilter" placeholder="Filter people…" autocomplete="off">
+    <div class="scroll wrap">
+      <table>
+        <thead><tr>
+          <th>Person</th><th style="width:120px">In Eesa</th>
+          <th style="width:160px">QuickBooks access</th><th style="width:150px">Last change</th>
+        </tr></thead>
+        <tbody id="members"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ---- Tools ---- -->
+  <section data-panel="tools" hidden>
+    <input type="search" id="toolFilter" placeholder="Filter tools…" autocomplete="off">
+    <div class="scroll wrap">
+      <table>
+        <thead><tr><th style="width:210px">Tool</th><th style="width:80px">Type</th><th>What it does</th></tr></thead>
+        <tbody id="tools"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+// The Eesa shell provides a short-lived UI-session token. Accept it from
+// ?t= / #t= or an injected global, matching the other first-party plugins.
+const params = new URLSearchParams(location.search);
+const hash = new URLSearchParams(location.hash.slice(1));
+const TOKEN = params.get('t') || hash.get('t') || window.__EESA_UI_TOKEN__ || '';
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+));
+
+async function api(path, opts = {}) {
+  const r = await fetch('/api' + path, {
+    ...opts,
+    headers: {
+      Authorization: 'Bearer ' + TOKEN,
+      'Content-Type': 'application/json',
+      ...(opts.headers || {}),
+    },
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j.error && (j.error.message || j.error)) || ('HTTP ' + r.status));
+  return j.data ?? j;
+}
+
+// ---- tabs -----------------------------------------------------------------
+document.querySelectorAll('.tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-selected', String(t === tab)));
+    document.querySelectorAll('section[data-panel]').forEach((s) => {
+      s.hidden = s.dataset.panel !== tab.dataset.panel;
+    });
+  });
+});
+
+// ---- overview -------------------------------------------------------------
+const row = (label, html) => `<div class="row"><dt>${esc(label)}</dt><dd>${html}</dd></div>`;
+
+function renderStatus(d) {
+  const c = d.connection;
+  const rows = [];
+  if (c.connected) {
+    rows.push(row('Connection', '<span class="pill ok">Connected</span>'));
+    rows.push(row('Company (realm)', `<code>${esc(c.realmId)}</code>`));
+    if (c.environment === 'sandbox') rows.push(row('Environment', '<span class="pill warn">Sandbox</span>'));
+  } else {
+    rows.push(row('Connection', '<span class="pill bad">Not connected</span>'));
+    rows.push(row('', `${esc(c.message || '')} <a href="${esc(d.connectUrl)}" target="_blank" rel="noopener">Open Integrations</a>`));
+  }
+  rows.push(row('Your access', d.role === 'admin'
+    ? '<span class="pill ok">Admin — read and write</span>'
+    : '<span class="pill warn">Reader — read only</span>'));
+  $('status').innerHTML = rows.join('');
+  $('sub').textContent = c.connected
+    ? 'Connected. Ask the agent about invoices, bills, customers or reports.'
+    : 'No QuickBooks company is connected to this workspace yet.';
+}
+
+function renderCounts(stats, writesEnabled) {
+  const labels = { READ: 'read', WRITE: 'create', UPDATE: 'update', DELETE: 'delete' };
+  $('counts').innerHTML = Object.entries(labels).map(([key, label]) =>
+    `<div class="count"><b>${stats.byCategory[key] || 0}</b><span>${label} tools</span></div>`).join('');
+  const off = Object.entries(writesEnabled).filter(([, on]) => !on).map(([k]) => k);
+  $('writeNote').textContent = off.length
+    ? `${off.join(', ')} tools are switched off for this deployment, so the agent cannot use them at all — `
+      + 'they are not offered to it and cannot be called by name.'
+    : 'All tool categories are enabled on this deployment. Whether a given person may change anything '
+      + 'still depends on their access on the Permissions tab.';
+}
+
+// ---- tools ----------------------------------------------------------------
+function renderTools(tools) {
+  const draw = (list) => {
+    $('tools').innerHTML = list.map((t) => `
+      <tr>
+        <td><code>${esc(t.name)}</code></td>
+        <td>${t.mutating ? '<span class="pill warn">write</span>' : '<span class="pill ok">read</span>'}</td>
+        <td>${esc(t.description)}</td>
+      </tr>`).join('');
+  };
+  draw(tools);
+  $('toolFilter').addEventListener('input', (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    draw(!q ? tools : tools.filter((t) =>
+      t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q)));
+  });
+}
+
+// ---- permissions ----------------------------------------------------------
+const LEVEL_LABEL = { none: 'No access', staff: 'Reader', admin: 'Admin' };
+
+function renderMembers(data, me) {
+  const banner = [];
+  if (!data.storeConfigured) {
+    banner.push('<div class="banner bad"><b>Access cannot be saved.</b> '
+      + 'DATABASE_URL is not set on the plugin service, so changes here will not stick.</div>');
+  }
+  if (data.diag && data.diag.error) {
+    banner.push(`<div class="banner warn"><b>No people to show.</b> ${esc(data.diag.error)}</div>`);
+  }
+  if (data.bootstrap && data.storeConfigured) {
+    banner.push('<div class="banner warn"><b>No QuickBooks admin yet.</b> '
+      + 'You can see this page because you are a workspace admin in Eesa. Give at least one '
+      + 'person Admin access so QuickBooks access can be managed here from now on.</div>');
+  }
+  $('permBanner').innerHTML = banner.join('');
+
+  const draw = (list) => {
+    $('members').innerHTML = list.map((m) => {
+      const isMe = String(m.employeeRef) === String(me);
+      const options = ['none', 'staff', 'admin'].map((lvl) =>
+        `<option value="${lvl}"${m.access === lvl ? ' selected' : ''}>${LEVEL_LABEL[lvl]}</option>`).join('');
+      const when = m.updatedAt ? new Date(m.updatedAt).toLocaleDateString() : '—';
+      return `
+        <tr data-ref="${esc(m.employeeRef)}">
+          <td class="who">${esc(m.name)}${m.offRoster ? ' <span class="pill mute">not in workspace</span>' : ''}
+            <small>${esc(m.email || m.employeeRef)}</small></td>
+          <td>${m.platformRole ? `<span class="pill mute">${esc(m.platformRole)}</span>` : '—'}</td>
+          <td>
+            <select data-ref="${esc(m.employeeRef)}" data-name="${esc(m.name)}" data-email="${esc(m.email)}"
+              ${isMe ? 'disabled title="You cannot change your own access"' : ''}>${options}</select>
+            <span class="status"></span>
+          </td>
+          <td>${when}</td>
+        </tr>`;
+    }).join('');
+
+    $('members').querySelectorAll('select').forEach((sel) => {
+      sel.addEventListener('change', async () => {
+        const cell = sel.parentElement.querySelector('.status');
+        const previous = sel.dataset.previous || '';
+        cell.className = 'status';
+        cell.textContent = 'Saving…';
+        sel.disabled = true;
+        try {
+          await api('/admin/members', {
+            method: 'POST',
+            body: JSON.stringify({
+              employeeRef: sel.dataset.ref,
+              access: sel.value,
+              name: sel.dataset.name,
+              email: sel.dataset.email,
+            }),
+          });
+          cell.className = 'status saved';
+          cell.textContent = 'Saved';
+          sel.dataset.previous = sel.value;
+          setTimeout(() => { cell.textContent = ''; }, 2500);
+        } catch (e) {
+          // Put the control back where it was, so the page never shows a
+          // permission the server did not accept.
+          if (previous) sel.value = previous;
+          cell.className = 'status failed';
+          cell.textContent = e.message;
+        } finally {
+          sel.disabled = false;
+        }
+      });
+      sel.dataset.previous = sel.value;
+    });
+  };
+
+  draw(data.members);
+  $('permFilter').addEventListener('input', (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    draw(!q ? data.members : data.members.filter((m) =>
+      (m.name || '').toLowerCase().includes(q) || (m.email || '').toLowerCase().includes(q)));
+  });
+}
+
+// ---- boot -----------------------------------------------------------------
+(async () => {
+  try {
+    const [status, toolData, me] = await Promise.all([
+      api('/status'), api('/tools'), api('/me'),
+    ]);
+    renderStatus(status);
+    renderCounts(status.tools, status.writesEnabled);
+    renderTools(toolData.tools);
+    $('body').hidden = false;
+
+    // The Permissions tab only exists for admins; a reader is not shown a page
+    // full of controls that will all be refused.
+    if (status.role === 'admin') {
+      $('tabPermissions').hidden = false;
+      try {
+        renderMembers(await api('/admin/members'), me.sub || '');
+      } catch (e) {
+        $('permBanner').innerHTML = `<div class="banner bad">${esc(e.message)}</div>`;
+      }
+    }
+  } catch (e) {
+    $('sub').textContent = '';
+    $('error').hidden = false;
+    $('error').innerHTML = `<b>Could not load QuickBooks.</b><p class="note">${esc(e.message)}</p>`;
+  }
+})();
+</script>
+</body>
+</html>

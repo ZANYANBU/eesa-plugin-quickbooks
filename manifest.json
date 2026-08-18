@@ -2,8 +2,8 @@
   "manifestVersion": "1.0",
   "slug": "quickbooks",
   "name": "QuickBooks Online",
-  "version": "1.0.0",
-  "description": "QuickBooks Online as agent tools, via Intuit's OFFICIAL MCP server (github.com/intuit/quickbooks-online-mcp-server, Apache-2.0), pinned to commit 099351858ee696dbbeb00dc7ca8e3a86276d86bb. A thin HTTP bridge adapts its stdio MCP transport to Eesa's stateless JSON-RPC. Ships READ-ONLY by default: QUICKBOOKS_DISABLE_WRITE/UPDATE/DELETE are set, so the container cannot create, update or delete anything in QuickBooks regardless of what is asked of it.",
+  "version": "2.0.0",
+  "description": "QuickBooks Online as agent tools. Ask about invoices, bills, customers, vendors and money owed, or pull any of the eleven financial reports — balance sheet, profit and loss, cash flow, trial balance, general ledger, A/R and A/P ageing and the rest. Each workspace connects its own QuickBooks company under Settings, Integrations; the plugin stores no credentials of its own.",
   "icon": "",
   "hostedBy": "self",
   "developer": {
@@ -11,21 +11,51 @@
     "email": "team@eesa.ai"
   },
   "auth": {
-    "verify": "bearer",
-    "signingSecretEnv": "GATEWAY_TOKEN",
+    "verify": "eesa-jwks",
     "gatewayOnly": true
   },
   "scopes": [
-    "quickbooks:read"
+    "quickbooks:read",
+    "quickbooks:write"
   ],
-  "health": {
-    "liveness": "/health",
-    "readiness": "/health/token"
-  },
-  "volumes": [
+  "permissions": [
     {
-      "mountPath": "/data",
-      "name": "qb-token"
+      "key": "quickbooks:reader:read",
+      "label": "Read QuickBooks",
+      "description": "See invoices, bills, customers, vendors and financial reports from the workspace's QuickBooks company."
+    },
+    {
+      "key": "quickbooks:admin:write",
+      "label": "Change QuickBooks records",
+      "description": "Let the agent create, update and delete records in QuickBooks on this user's behalf. Grant sparingly — these actions post to the company's real accounting records."
     }
-  ]
+  ],
+  "roles": [
+    {
+      "key": "admin",
+      "label": "QuickBooks Admin",
+      "description": "Read everything, and let the agent create, update and delete records in QuickBooks."
+    },
+    {
+      "key": "staff",
+      "label": "QuickBooks Reader",
+      "description": "Read invoices, bills, contacts and reports. Cannot change anything in QuickBooks."
+    }
+  ],
+  "surfaces": {
+    "mcp": {
+      "endpoint": "https://qb.plugins.bibekpoudel.com/mcp",
+      "transport": "streamable-http",
+      "tools": []
+    },
+    "ui": {
+      "url": "https://qb.plugins.bibekpoudel.com/app",
+      "embeddable": true
+    }
+  },
+  "entitlementKey": "quickbooks",
+  "setup": {
+    "instructions": "Connect your QuickBooks company under Settings, Integrations — Eesa runs the Intuit sign-in and holds the connection for this workspace. Nothing needs configuring here. Until a company is connected the tools reply that QuickBooks is not connected yet. The plugin is read-only by default; to let the agent post to QuickBooks, grant the 'Change QuickBooks records' permission and enable writes on the plugin deployment.",
+    "config": []
+  }
 }
