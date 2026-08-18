@@ -38,6 +38,28 @@ parameters, same QuickBooks payload construction — including the parts that
 encode hard-won knowledge, like the read-merge-write in `update_bill` that stops
 QuickBooks silently stripping line-level class and tax coding.
 
+## Write posture — as deployed
+
+`QUICKBOOKS_DISABLE_WRITE` / `_UPDATE` / `_DELETE` decide the tool surface at
+container start: a disabled verb is never registered, so it cannot be called
+however it is asked for. All three on is 71 read-only tools.
+
+**As deployed today: write and update are ON, delete is OFF** — set on the
+production (`is_preview: false`) env rows in Coolify, which override the image's
+defaults of all `true`. They were turned on so the month-end journal-entry sync
+can post and revise, against the **sandbox** realm rather than anyone's real
+books. Delete has never been enabled and nothing in that sync removes anything.
+
+> **This version adds a second gate, and the sync will break without it.**
+> Clearing `QUICKBOOKS_DISABLE_WRITE` is no longer sufficient. A write now also
+> requires the caller to resolve to `admin`, and an agent-path call carries no
+> user for a role to attach to — so `QUICKBOOKS_AGENT_MAY_WRITE=true` has to be
+> set on the same env rows, or every posting attempt is refused with "you do not
+> have permission to change anything in QuickBooks". See *Write protection*.
+
+If you change these flags, change this section in the same commit. A README that
+claims read-only while the container can post is worse than no README.
+
 ## Permissions
 
 `/app` has a **Permissions tab**, visible to QuickBooks admins, listing everyone
@@ -291,6 +313,11 @@ See [.env.example](.env.example). Required: `EESA_JWKS_URL`, `EESA_API_BASE`,
 
 There are no Intuit credentials here. The app id and secret live on the Eesa
 server as `QB_OAUTH_CLIENT_ID` / `QB_OAUTH_CLIENT_SECRET`.
+
+Currently set on the production env rows: `QUICKBOOKS_DISABLE_WRITE=false`,
+`QUICKBOOKS_DISABLE_UPDATE=false`, `QUICKBOOKS_DISABLE_DELETE=true` — keep
+DELETE `true` — plus `QUICKBOOKS_AGENT_MAY_WRITE=true` so the month-end sync can
+post. See *Write posture — as deployed*.
 
 ```bash
 npm run schema           # apply db/schema.sql (idempotent)

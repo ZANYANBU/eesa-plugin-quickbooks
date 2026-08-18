@@ -55,7 +55,7 @@
   },
   "entitlementKey": "quickbooks",
   "setup": {
-    "instructions": "Connect your QuickBooks company under Settings, Integrations — Eesa runs the Intuit sign-in and holds the connection for this workspace. Nothing needs configuring here. Until a company is connected the tools reply that QuickBooks is not connected yet. The plugin is read-only by default; to let the agent post to QuickBooks, grant the 'Change QuickBooks records' permission and enable writes on the plugin deployment.",
+    "instructions": "Connect your QuickBooks company under Settings, Integrations — Eesa runs the Intuit sign-in and holds the connection for this workspace. Nothing needs configuring here. Until a company is connected the tools reply that QuickBooks is not connected yet. Whether the agent may CHANGE anything depends on two things: the deployment's QUICKBOOKS_DISABLE_WRITE/UPDATE/DELETE switches, and the 'Change QuickBooks records' permission granted to that user. This deployment currently has write and update enabled and delete disabled.",
     "config": []
   }
 }
