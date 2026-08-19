@@ -44,6 +44,35 @@ than no manifest.
 
 ## The token problem — read this before changing anything
 
+### The two-refresher bug (fixed 19 Aug 2026)
+
+Symptom: `tools/list` returns all its tools and the container looks healthy, but
+every `tools/call` comes back with
+`Error: listen EADDRINUSE: address already in use :::8000` — and, because of how
+Intuit's server reports failures, with `isError: false`.
+
+That port is Intuit's **interactive OAuth callback server**
+(`src/clients/quickbooks-client.ts`). It only starts when the client has given
+up on refreshing and wants a human at a browser. So the message is not really
+about a port; it means *auth is dead*.
+
+Cause: both halves managed the same rotating credential. This gateway refreshed
+and persisted it, and Intuit's client refreshed it too, writing to `/app/.env`.
+Whichever rotated second invalidated the other's copy. Worse, a child is spawned
+with a **snapshot** of `process.env`, so rotating here never reached a running
+child. It stayed working for about an hour on the child's access token, then
+died — which is why it always looked fine right after a deploy.
+
+Fix: exactly one component rotates the token. The gateway refreshes every 45
+minutes — inside the ~60-minute access-token lifetime, so the child never
+reaches the point of refreshing itself — and drops the child whenever the token
+rotates, so the next call respawns it with the new one.
+
+If you ever see EADDRINUSE :8000 again, do not go looking for a port conflict.
+Check whether something else has rotated the refresh token.
+
+### The original problem
+
 Intuit rotates the refresh token on roughly every refresh and expires the old
 one shortly after. A long-lived server holds the rotated value only in memory,
 so a restart boots with whatever is in the environment.

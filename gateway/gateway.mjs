@@ -120,6 +120,27 @@ async function refreshAndPersist() {
       lastRefreshAt = new Date().toISOString();
       lastRefreshError = saved ? null : "persist failed";
       console.error(`[gateway] token refreshed (rotated=${rotated}, persisted=${saved})`);
+
+      // Intuit ROTATES the refresh token, and a child is spawned with a COPY of
+      // process.env taken at spawn time — later mutations here never reach it.
+      // So the moment we rotate, the running child is holding a dead token. It
+      // does not notice until its ~1h access token expires, at which point
+      // Intuit's client gives up and starts its INTERACTIVE OAuth flow, which
+      // binds :8000 and fails with EADDRINUSE on every retry. tools/list keeps
+      // working (it needs no auth), so the server looks healthy while every
+      // tools/call returns an error — as `isError:false` text, no less.
+      //
+      // Drop the child here. The next call respawns it with the new token.
+      if (rotated && client) {
+        const stale = client;
+        client = null;
+        Promise.resolve()
+          .then(() => stale.close())
+          .catch(() => {})
+          .finally(() =>
+            console.error("[gateway] token rotated; dropped the QBO MCP child so the next call respawns it"),
+          );
+      }
     } else {
       // Never log the response body — it can carry a token on the success path
       // and we do not want a credential in a log aggregator.
@@ -259,7 +280,14 @@ server.listen(PORT, "0.0.0.0", () =>
 );
 
 // Keep the stored token fresh so a restart never needs a manual re-auth.
-// First pass shortly after boot, then every 6h — well inside Intuit's ~24h
-// rotation grace, so a single missed run is survivable.
+//
+// The interval is 45 MINUTES, not hours, and that is load-bearing. Intuit's
+// client refreshes on its own once its access token (~60 min) is close to
+// expiry — and it would refresh using the token it was spawned with, rotating
+// it out from under us and leaving OUR stored copy dead. Refreshing and
+// respawning inside that 60-minute window means the child is always younger
+// than its access token, so it never reaches the point of refreshing itself.
+// Exactly one component rotates this credential. Do not lengthen this past the
+// access-token lifetime without making the child stop managing its own tokens.
 setTimeout(refreshAndPersist, 8000);
-setInterval(refreshAndPersist, 6 * 60 * 60 * 1000);
+setInterval(refreshAndPersist, 45 * 60 * 1000);
