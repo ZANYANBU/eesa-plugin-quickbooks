@@ -175,6 +175,25 @@
   .skel { color: var(--label3); }
   .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .areas { display: flex; gap: 7px; flex-wrap: wrap; padding: 13px 16px 15px; }
+
+  /* A change to QuickBooks. */
+  .change { background: var(--group); border-radius: var(--r); box-shadow: var(--shadow);
+            padding: 13px 15px 12px; margin-bottom: 10px; }
+  .chead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .chead b { font-size: 16px; display: block; margin-top: 4px; }
+  .amt { font-size: 24px; font-weight: 700; letter-spacing: -.02em; white-space: nowrap;
+         font-variant-numeric: tabular-nums; }
+  .lines { margin: 10px 0 0; border-top: 1px solid var(--sep); }
+  .line { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0;
+          border-bottom: 1px solid var(--sep); font-size: 14px; }
+  .strip { margin-top: 10px; border-radius: 10px; padding: 9px 12px; font-size: 14px; line-height: 1.4; }
+  .strip b { display: block; margin-bottom: 2px; }
+  .strip.bad { background: rgba(196,53,28,.08); color: var(--out); }
+  .strip.warn { background: rgba(178,80,0,.08); color: var(--warn); }
+  .strip.ok { background: rgba(27,138,62,.08); color: var(--in); }
+  .actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px;
+             flex-wrap: wrap; margin-top: 12px; }
+  .actions .meta { flex: 1; text-align: left; }
 </style>
 </head>
 <body>
@@ -228,12 +247,12 @@
   </section>
 
   <section id="tab-approvals" role="tabpanel" hidden>
+    <p class="sub" style="margin:0 4px 14px" id="apprWho">Anything that would change
+      QuickBooks needs an appointed person to agree to it first.</p>
     <div class="glabel" style="margin-top:0">Waiting on you</div>
-    <div class="group" id="apprMine"><div class="msg skel">Loading…</div></div>
-    <p class="gnote">Anything that would change QuickBooks needs a person to
-      agree to it first. Nothing is changed until it is approved.</p>
+    <div id="apprMine"><div class="msg skel">Loading…</div></div>
     <div class="glabel">Your requests</div>
-    <div class="group" id="apprOwn"><div class="msg skel">Loading…</div></div>
+    <div id="apprOwn"><div class="msg skel">Loading…</div></div>
   </section>
 
   <section id="tab-access" role="tabpanel" hidden>
@@ -460,44 +479,45 @@ function agingList(report, whoLabel) {
 }
 
 // ── what this person may see ────────────────────────────────────────────
-// The gate is the authority; this only decides what to ASK for. A panel the
-// role does not cover would 403, and six red errors is a poor way to learn
-// what your job is.
-var AREA = {
-  REPORTS: 'reports', SALES: 'customers_and_sales', PURCHASES: 'vendors_and_purchases',
-};
+// The gate is the authority; this only decides what to ASK for. The keys are
+// Intuit's own areas, and the split of reports into financial / A/R / A/P is
+// Intuit's too: a Bookkeeper has "A/R and A/P reports" and NOT "profit and
+// loss, balance sheet or cash flow", so this page shows them the two aging
+// summaries and no P&L card — exactly what QuickBooks shows them.
 function may(area) {
   return !!(ACCESS && ACCESS.areas && ACCESS.areas.indexOf(area) !== -1);
 }
 
 function overviewSkeleton() {
   var html = '';
-  if (may(AREA.REPORTS)) {
-    html += '<div class="tiles" id="tiles">'
-      + '<div class="tile"><div class="cap">Money coming in</div>'
+  if (may('reports_financial')) {
+    html += '<div class="glabel" style="margin-top:0">Profit and loss</div>'
+      + '<div class="tiles" id="tiles">'
+      + '<div class="tile"><div class="cap">Income</div>'
       + '<div class="fig in" id="income">—</div>'
-      + '<div class="cap2">Sales invoiced in this period</div></div>'
-      + '<div class="tile"><div class="cap">Money going out</div>'
+      + '<div class="cap2">Sales and other income</div></div>'
+      + '<div class="tile"><div class="cap">Expenses</div>'
       + '<div class="fig out" id="expense">—</div>'
-      + '<div class="cap2">Costs, expenses and bills</div></div>'
-      + '<div class="tile"><div class="cap">Left over</div>'
+      + '<div class="cap2">Cost of goods sold, expenses and other expenses</div></div>'
+      + '<div class="tile"><div class="cap">Net income</div>'
       + '<div class="fig" id="net">—</div>'
-      + '<div class="cap2">What is left after money out</div></div></div>';
+      + '<div class="cap2">Income less expenses</div></div></div>';
   }
-  if (may(AREA.SALES)) {
-    html += '<div class="glabel">Who owes you</div>'
+  if (may('reports_ar')) {
+    html += '<div class="glabel">A/R aging summary</div>'
       + '<div class="group" id="ar"><div class="msg skel">Loading…</div></div>'
-      + '<p class="gnote">Customers who have not paid yet, largest first.</p>';
+      + '<p class="gnote">Open customer balances, largest first.</p>';
   }
-  if (may(AREA.PURCHASES)) {
-    html += '<div class="glabel">What you owe</div>'
+  if (may('reports_ap')) {
+    html += '<div class="glabel">A/P aging summary</div>'
       + '<div class="group" id="ap"><div class="msg skel">Loading…</div></div>'
-      + '<p class="gnote">Bills you have not paid yet.</p>';
+      + '<p class="gnote">Unpaid bills, largest first.</p>';
   }
   if (!html) {
     html = '<div class="group"><div class="msg">'
       + (ACCESS && ACCESS.has_access
-          ? 'Your QuickBooks role does not cover any of these figures.'
+          ? 'Your QuickBooks role does not include reports, so there are no '
+            + 'figures to show here. Ask a question on the Ask tab about what it does cover.'
           : 'No QuickBooks role has been recorded for you yet, so nothing from '
             + 'QuickBooks will open here. Whoever looks after QuickBooks can add it.')
       + '</div></div>';
@@ -507,7 +527,7 @@ function overviewSkeleton() {
 
 async function loadAll() {
   $('#overviewBody').innerHTML = overviewSkeleton();
-  if (!may(AREA.REPORTS) && !may(AREA.SALES) && !may(AREA.PURCHASES)) return;
+  if (!may('reports_financial') && !may('reports_ar') && !may('reports_ap')) return;
 
   var d = periodDates($('#period').value);
   $('#status').textContent = 'Checking QuickBooks…';
@@ -518,22 +538,18 @@ async function loadAll() {
     if (info && info.CompanyName) $('#co').textContent = info.CompanyName;
   } catch (e) { /* the name is nice to have, not worth failing over */ }
 
-  if (may(AREA.REPORTS)) {
+  if (may('reports_financial')) {
     try {
       var pl = payload(await invoke('get_profit_and_loss',
         { start_date: d[0], end_date: d[1] }));
       // Every section that is money in, and every section that is money out.
       // A QuickBooks P&L splits what goes out three ways — cost of goods sold,
       // expenses, other expenses — and this card used to show only the middle
-      // one. On the sandbox that read US$47,677 against US$209,937 coming in
-      // and US$158,939 left over: three tiles side by side that a bookkeeper
-      // cannot subtract. With all three counted the identity holds exactly,
+      // one. With all three counted the identity holds exactly,
       //   209,937.27 - (405.00 + 47,677.42 + 2,916.00) = 158,938.85
       // which is QuickBooks' own Net Income to the cent.
       var income  = sumGroups(pl, ['income', 'otherincome']);
       var expense = sumGroups(pl, ['cogs', 'expenses', 'otherexpenses']);
-      // The bottom line is QuickBooks' own figure, never our arithmetic — the
-      // subtraction is a fallback for a layout that omits it.
       var net = findTotal(pl, 'netincome');
       if (net === null) net = findTotal(pl, 'net income');
       if (net === null && income !== null && expense !== null) net = income - expense;
@@ -547,14 +563,14 @@ async function loadAll() {
     }
   }
 
-  if (may(AREA.SALES)) {
+  if (may('reports_ar')) {
     try {
       $('#ar').innerHTML = agingList(payload(await invoke('get_aged_receivables', {})), 'Customer');
     } catch (e) { $('#ar').innerHTML = '<div class="msg bad">' + esc(e.message) + '</div>'; }
   }
-  if (may(AREA.PURCHASES)) {
+  if (may('reports_ap')) {
     try {
-      $('#ap').innerHTML = agingList(payload(await invoke('get_aged_payables', {})), 'Supplier');
+      $('#ap').innerHTML = agingList(payload(await invoke('get_aged_payables', {})), 'Vendor');
     } catch (e) { $('#ap').innerHTML = '<div class="msg bad">' + esc(e.message) + '</div>'; }
   }
 
@@ -644,10 +660,12 @@ function md(src) {
 // Suggestions follow the role, so nobody is invited to ask a question their
 // own access will refuse to answer.
 var SUGGEST = [
-  ['reports', 'What is our profit and loss for last month?'],
-  ['reports', 'How did this month compare with last month?'],
-  ['customers_and_sales', 'Who owes us money?'],
-  ['vendors_and_purchases', 'What bills are overdue?'],
+  ['reports_financial', 'What is our profit and loss for last month?'],
+  ['reports_financial', 'How did this month compare with last month?'],
+  ['reports_ar', 'Who owes us money?'],
+  ['reports_ap', 'What bills are overdue?'],
+  ['sales', 'Draft an invoice for a customer'],
+  ['expenses', 'Enter a bill from a vendor'],
 ];
 function paintChips() {
   var mine = SUGGEST.filter(function (s) { return may(s[0]); });
@@ -707,6 +725,17 @@ async function ask(question) {
             + 'It is still being worked on — reopen this tab in a moment to see it.' };
     }
     settle(bubble, t);
+    // A question that proposed a change: show the card under the answer, so
+    // the person sees what was recorded, that it is waiting, and for whom.
+    if (t.status === 'DONE') {
+      try {
+        var q = await platform('quickbooks_changes', { limit: 5 });
+        var since = Date.parse(sent.turn.created_at || 0);
+        (q.my_requests || []).filter(function (c) { return Date.parse(c.created_at) >= since - 5000; })
+          .forEach(function (c) { turn('QuickBooks', changeCard(c, true)); });
+        if (q) { QUEUE = q; }
+      } catch (e2) { /* the answer already said it; the card is extra */ }
+    }
   } catch (e) {
     bubble.innerHTML = '<p style="margin:0;color:var(--out)">' + esc(e.message) + '</p>';
   } finally {
@@ -751,53 +780,170 @@ $('#askChips').addEventListener('click', function (e) {
   if (e.target.tagName === 'BUTTON') ask(e.target.textContent);
 });
 
-// ── approvals ───────────────────────────────────────────────────────────
-function statusPill(st) {
-  var s = String(st || '').toUpperCase();
-  var cls = s === 'PENDING' ? 'wait' : (s === 'APPROVED' ? 'yes' : (s === 'REJECTED' ? 'no' : ''));
-  var word = s === 'PENDING' ? 'Waiting' : (s === 'APPROVED' ? 'Approved'
-           : (s === 'REJECTED' ? 'Turned down' : (s || 'Unknown')));
-  return '<span class="pill ' + cls + '">' + esc(word) + '</span>';
+// ── approvals — changes to QuickBooks, waiting for a person ──────────────
+// Countersign's card, kept where it was right: a person reading it must be
+// able to answer, without clicking, whether this is a real financial action,
+// whether it has happened yet, exactly what will happen and to whom, and who
+// or what is stopping it. So the amount is the largest thing on it, the
+// status is a stripe down the left, and a button that cannot be pressed says
+// why rather than disappearing.
+var RAIL = { PENDING: 'var(--warn)', APPROVED: 'var(--qb)', EXECUTING: 'var(--qb)',
+             EXECUTED: 'var(--in)', VERIFIED: 'var(--in)', FAILED: 'var(--out)',
+             REJECTED: 'var(--out)', CANCELLED: 'var(--label3)', DRAFT: 'var(--label3)' };
+function changeCard(c, mine) {
+  var rail = RAIL[c.status] || 'var(--label3)';
+  var who = c.counterparty_name
+    ? '<div class="meta">' + (c.counterparty_kind === 'vendor' ? 'Vendor' : 'Customer')
+      + ': ' + esc(c.counterparty_name) + '</div>' : '';
+  var by = '<div class="meta">Requested by ' + esc(c.requested_by_name || c.requested_by)
+    + (mine ? ' (you)' : '') + (c.created_at ? ' · ' + esc(when(c.created_at)) : '') + '</div>';
+  var lines = '';
+  var p = (c.payload && c.payload.params) || {};
+  var L = p.Line || p.line_items || [];
+  if (Array.isArray(L) && L.length) {
+    lines = '<div class="lines">' + L.slice(0, 8).map(function (l) {
+      return '<div class="line"><span>' + esc(l.Description || l.description || 'Line')
+        + '</span><span class="val">' + money(l.Amount || l.amount || 0) + '</span></div>';
+    }).join('') + '</div>';
+  }
+  var val = '';
+  if (c.validation && c.validation.errors && c.validation.errors.length) {
+    val = '<div class="strip bad"><b>This cannot be approved yet</b>'
+      + c.validation.errors.map(function (e) { return '<div>• ' + esc(e) + '</div>'; }).join('') + '</div>';
+  } else if (c.validation && c.validation.warnings && c.validation.warnings.length) {
+    val = '<div class="strip warn"><b>Check before approving</b>'
+      + c.validation.warnings.map(function (e) { return '<div>• ' + esc(e) + '</div>'; }).join('') + '</div>';
+  }
+  var req = '';
+  if (c.status === 'PENDING') {
+    req = '<div class="meta">' + c.approvals_received + ' of ' + c.required_approvals
+      + ' approval' + (c.required_approvals === 1 ? '' : 's') + ' received'
+      + (c.high_risk ? ' · high risk: the amount must be typed back' : '')
+      + ((c.matched_policies || []).length
+          ? ' · policy: ' + esc(c.matched_policies.map(function (m) { return m.name; }).join(', ')) : '')
+      + (c.expires_at ? ' · expires ' + esc(when(c.expires_at)) : '') + '</div>';
+  }
+  var outcome = '';
+  if (c.status === 'VERIFIED' || c.status === 'EXECUTED') {
+    outcome = '<div class="strip ok"><b>' + esc(c.kind || 'Change') + ' created in QuickBooks</b>'
+      + (c.quickbooks_id ? '<div>QuickBooks ID ' + esc(c.quickbooks_id)
+        + (c.quickbooks_doc_number ? ' · No. ' + esc(c.quickbooks_doc_number) : '') + '</div>' : '')
+      + '<div>' + (c.status === 'VERIFIED'
+          ? 'Read back from QuickBooks and confirmed to match what was approved.'
+          : 'Sent. Checking that QuickBooks holds what was approved…') + '</div></div>';
+  } else if (c.status === 'FAILED') {
+    outcome = '<div class="strip bad"><b>QuickBooks refused it</b><div>' + esc(c.status_reason || '')
+      + '</div><div>Nothing was created.</div></div>';
+  } else if (c.status === 'REJECTED') {
+    var r = (c.decisions || []).filter(function (d) { return d.status === 'REJECTED'; })[0];
+    outcome = '<div class="strip bad"><b>Turned down</b><div>' + esc((r && r.reason) || c.status_reason || '')
+      + '</div>' + (r ? '<div>by ' + esc(r.by) + '</div>' : '') + '</div>';
+  }
+  var actions = '';
+  if (c.status === 'PENDING' && !mine) {
+    var blocked = (c.blockers || []).length ? c.blockers[0] : '';
+    actions = '<div class="actions">'
+      + (blocked ? '<span class="meta">' + esc(blocked) + '</span>' : '')
+      + '<button class="btn" data-act="reject" data-id="' + esc(c.id) + '"' + (blocked ? ' disabled' : '') + '>Turn down</button>'
+      + '<button class="btn primary" data-act="approve" data-id="' + esc(c.id) + '"' + (blocked ? ' disabled' : '') + '>Approve</button>'
+      + '</div>';
+  } else if (c.status === 'PENDING' && mine) {
+    actions = '<div class="actions"><button class="btn" data-act="cancel" data-id="' + esc(c.id) + '">Cancel request</button></div>';
+  }
+  return '<div class="change" style="border-left:5px solid ' + rail + '">'
+    + '<div class="chead"><div><span class="pill ' + pillClass(c.status) + '">' + esc(c.status_label || c.status) + '</span>'
+    + ' <b>' + esc(c.summary) + '</b>' + who + by + '</div>'
+    + '<div class="amt">' + money(c.amount) + '</div></div>'
+    + lines + val + req + outcome + actions + '</div>';
 }
-function approvalRows(list, emptyText) {
-  if (!list || !list.length) return '<div class="msg">' + esc(emptyText) + '</div>';
-  return list.map(function (r) {
-    var bits = [];
-    if (r.requested_by) bits.push('asked by ' + esc(r.requested_by));
-    if (r.role) bits.push(esc(r.role));
-    if (r.note) bits.push(esc(r.note));
-    return '<div class="item"><div class="main"><div class="name">'
-      + esc(r.action || r.kind || 'Request') + '</div>'
-      + (bits.length ? '<div class="meta">' + bits.join(' · ') + '</div>' : '')
-      + '</div>' + statusPill(r.status) + '</div>';
-  }).join('');
+function pillClass(st) {
+  return st === 'PENDING' ? 'wait' : (st === 'VERIFIED' || st === 'EXECUTED' || st === 'APPROVED') ? 'yes'
+       : (st === 'FAILED' || st === 'REJECTED') ? 'no' : '';
 }
+function when(iso) {
+  try { var d = new Date(iso); return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    + ' ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; }
+}
+
+var QUEUE = null;
 async function loadApprovals() {
   try {
-    var r = await platform('pending_approvals', { scope: 'both', limit: 25 });
-    var mine = (r && r.awaiting_my_approval) || [];
-    $('#apprMine').innerHTML = approvalRows(mine, 'Nothing is waiting on you.');
-    $('#apprOwn').innerHTML = approvalRows((r && r.my_requests) || [],
-                                           'You have not asked for anything.');
+    QUEUE = await platform('quickbooks_changes', { limit: 25 });
+    var waiting = QUEUE.waiting_on_me || [], mine = QUEUE.my_requests || [];
+    $('#apprMine').innerHTML = waiting.length
+      ? waiting.map(function (c) { return changeCard(c, false); }).join('')
+      : '<div class="msg">Nothing is waiting on you.</div>';
+    $('#apprOwn').innerHTML = mine.length
+      ? mine.map(function (c) { return changeCard(c, true); }).join('')
+      : '<div class="msg">You have not asked for any changes.</div>';
+    var names = (QUEUE.approvers || []).map(function (a) { return esc(a.name || a.email); });
+    $('#apprWho').textContent = names.length
+      ? 'Changes are approved by ' + names.join(', ') + '.'
+      : 'Nobody has been appointed to approve changes yet, so nothing can change QuickBooks through Eesa.';
     var dot = $('#apprDot');
-    // Only ever a count of what needs a DECISION. Badging your own requests
-    // would mark the tab unread for something you already know about.
-    dot.hidden = !mine.length;
-    dot.textContent = String(mine.length);
+    // Only ever a count of what needs a DECISION from this person.
+    var n = waiting.filter(function (c) { return c.can_decide; }).length;
+    dot.hidden = !n; dot.textContent = String(n);
   } catch (e) {
     $('#apprMine').innerHTML = '<div class="msg bad">' + esc(e.message) + '</div>';
-    $('#apprOwn').innerHTML = '<div class="msg"></div>';
+    $('#apprOwn').innerHTML = '';
+  }
+}
+$('#tab-approvals').addEventListener('click', async function (e) {
+  var b = e.target.closest('button[data-act]');
+  if (!b || b.disabled) return;
+  var id = b.dataset.id, act = b.dataset.act;
+  var all = (QUEUE.waiting_on_me || []).concat(QUEUE.my_requests || []);
+  var c = all.filter(function (x) { return x.id === id; })[0];
+  if (!c) return;
+  var args = { change_id: id, decision: act };
+  if (act === 'approve') {
+    // Approving is the moment money moves: restate it, and for a high-risk
+    // change make the person type the amount — typing the figure forces them
+    // to read it, which is the failure a policy engine cannot catch.
+    var msg = 'Approve and send to QuickBooks?\n\n' + c.summary + '\n' + money(c.amount);
+    if (c.high_risk) {
+      var typed = prompt(msg + '\n\nThis is a high-risk change. Type the amount to confirm: ' + money(c.amount));
+      if (typed === null) return;
+      args.confirmed_amount = typed;
+    } else if (!confirm(msg)) return;
+  } else if (act === 'reject') {
+    var reason = prompt('Why is this being turned down? The reason goes to the person who asked.\n\n' + c.summary);
+    if (reason === null) return;
+    args.reason = reason;
+  } else if (act === 'cancel') {
+    if (!confirm('Cancel this request? Nothing has been sent to QuickBooks.')) return;
+  }
+  b.disabled = true;
+  try {
+    var r = await platform('quickbooks_change_decide', args);
+    if (!r.ok) throw new Error(r.error || 'That did not go through.');
+    await loadApprovals();
+    if (act === 'approve') pollChange(id);
+  } catch (err) {
+    alert(err.message);
+    b.disabled = false;
+  }
+});
+/** After the final approval the worker sends it; watch the card settle. */
+async function pollChange(id) {
+  for (var i = 0; i < 30; i++) {
+    await pause(2000);
+    var st = await platform('quickbooks_change_status', { change_id: id });
+    if (!st.ok) return;
+    var s = st.change.status;
+    if (s !== 'APPROVED' && s !== 'EXECUTING') { await loadApprovals(); return; }
   }
 }
 
 // ── your access ─────────────────────────────────────────────────────────
 var AREA_WORDS = {
-  customers_and_sales: 'Customers and sales',
-  vendors_and_purchases: 'Suppliers and purchases',
-  reports: 'Reports',
-  time_tracking: 'Time tracking',
-  take_payments: 'Taking payments',
-  administration: 'Administration',
+  sales: 'Sales', expenses: 'Expenses', inventory: 'Inventory', customers: 'Customers',
+  vendors: 'Vendors', bank_deposits: 'Bank deposits', transfers: 'Transfers',
+  accounting: 'Accounting', payroll: 'Payroll', employees: 'Employees',
+  reports_financial: 'Financial reports', reports_ar: 'A/R reports', reports_ap: 'A/P reports',
+  account_management: 'Company info', financial_planning: 'Budgets', taxes: 'Sales tax',
+  time: 'Time tracking', settings_lists: 'All lists',
 };
 function whenChecked(days) {
   if (days === null || days === undefined) return 'not dated';
@@ -816,8 +962,11 @@ function paintAccess(a) {
   $('#who').textContent = (name.trim()[0] || '·').toUpperCase();
   $('#who').hidden = false;
 
+  var labels = a.area_labels || {};
+  var viewOnly = a.view_only_areas || [];
   var areas = (a.areas || []).map(function (x) {
-    return '<span class="pill">' + esc(AREA_WORDS[x] || x) + '</span>'; }).join('');
+    return '<span class="pill">' + esc(labels[x] || AREA_WORDS[x] || x)
+      + (viewOnly.indexOf(x) !== -1 ? ' · view only' : '') + '</span>'; }).join('');
   var html = '<div class="glabel" style="margin-top:0">Your QuickBooks role</div>'
     + '<div class="group">'
     + '<div class="item"><div class="main"><div class="name" style="font-size:19px;font-weight:600">'
@@ -832,8 +981,9 @@ function paintAccess(a) {
     rows += row('In QuickBooks you can',
       a.can_write_in_quickbooks ? 'View and change things'
                                 : 'View only — nothing you do can change QuickBooks');
-    rows += row('Through Eesa', 'View only. Anything that would change QuickBooks '
-                                + 'needs an approver to agree first.');
+    rows += row('Through Eesa', (a.can_write_in_quickbooks
+      ? 'You can ask for changes. Each one waits for an approver before it reaches QuickBooks.'
+      : 'View only, as in QuickBooks.'));
     var names = (a.approvers || []).map(function (p) { return esc(p.name || p.email); });
     rows += row('Changes are approved by',
       names.length ? names.join(', ') + (a.is_approver ? ' — including you' : '')
