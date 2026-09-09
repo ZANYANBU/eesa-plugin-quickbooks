@@ -165,17 +165,40 @@ async function invoke(tool, params) {
   return res.json();
 }
 
-/** Intuit returns its reports as JSON inside a text block. */
+/**
+ * Get the data out, whatever shape it arrives in.
+ *
+ * Verified against the live gateway, because guessing cost a whole build:
+ *   get_company_info    -> the object itself   { CompanyName: "…", … }
+ *   get_profit_and_loss -> { text: "Profit and Loss Report: {…}" }
+ *   get_aged_receivables-> { text: "…" }
+ * The gateway unwraps MCP's { content: [{ text }] } envelope for some calls and
+ * not others, and a report's text carries a human prefix before its JSON. An
+ * earlier version of this handled only the envelope and so rendered every panel
+ * empty against a perfectly good 200.
+ */
 function payload(out) {
-  try {
-    var c = (out && (out.content || (out.data && out.data.content))) || [];
+  if (!out || typeof out !== 'object') return null;
+  var text = null;
+
+  // 1. MCP envelope, if the gateway passed one through.
+  var c = out.content || (out.data && out.data.content);
+  if (Array.isArray(c)) {
     for (var i = 0; i < c.length; i++) {
-      if (c[i] && typeof c[i].text === 'string') {
-        try { return JSON.parse(c[i].text); } catch (e) { /* keep looking */ }
-      }
+      if (c[i] && typeof c[i].text === 'string') { text = c[i].text; break; }
     }
-  } catch (e) {}
-  return null;
+  }
+  // 2. A bare { text: "…" }.
+  if (text === null && typeof out.text === 'string') text = out.text;
+
+  if (text === null) {
+    // 3. Already the object we want. `data` when the gateway nests it.
+    return (out.data && typeof out.data === 'object') ? out.data : out;
+  }
+  // A report's text reads "Profit and Loss Report: {…}", so start at the JSON.
+  var brace = text.indexOf('{');
+  if (brace === -1) return null;
+  try { return JSON.parse(text.slice(brace)); } catch (e) { return null; }
 }
 
 function money(n) {
