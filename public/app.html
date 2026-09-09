@@ -801,9 +801,20 @@ function changeCard(c, mine) {
   var p = (c.payload && c.payload.params) || {};
   var L = p.Line || p.line_items || [];
   if (Array.isArray(L) && L.length) {
+    // A line's money is Amount where Intuit gives one, and qty × unit_price
+    // where it gives those instead — the same rule the validator applies, so
+    // the card never shows a $0 line under a $12 total.
+    var lineAmt = function (l) {
+      if (l.Amount != null || l.amount != null) return Number(l.Amount != null ? l.Amount : l.amount);
+      var q = l.qty != null ? l.qty : (l.Qty != null ? l.Qty : l.quantity);
+      var u = l.unit_price != null ? l.unit_price : l.UnitPrice;
+      return (q != null && u != null) ? Number(q) * Number(u) : 0;
+    };
     lines = '<div class="lines">' + L.slice(0, 8).map(function (l) {
+      var q = l.qty != null ? l.qty : (l.Qty != null ? l.Qty : l.quantity);
       return '<div class="line"><span>' + esc(l.Description || l.description || 'Line')
-        + '</span><span class="val">' + money(l.Amount || l.amount || 0) + '</span></div>';
+        + (q != null && Number(q) !== 1 ? ' × ' + esc(String(q)) : '')
+        + '</span><span class="val">' + money(lineAmt(l)) + '</span></div>';
     }).join('') + '</div>';
   }
   var val = '';
