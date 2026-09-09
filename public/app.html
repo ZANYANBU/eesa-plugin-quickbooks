@@ -224,7 +224,7 @@
       <button class="btn primary" id="askSend">Ask</button>
     </div>
     <p class="gnote" id="askNote">Answers come from QuickBooks reports and can
-      take up to a minute.</p>
+      take a minute. Your questions are kept here so you can come back to them.</p>
   </section>
 
   <section id="tab-approvals" role="tabpanel" hidden>
@@ -664,30 +664,80 @@ function turn(who, html, cls) {
   d.scrollIntoView({ block: 'nearest' });
   return d;
 }
+function settle(bubble, t) {
+  if (t.status === 'DONE') {
+    bubble.innerHTML = md(t.answer);
+  } else if (t.status === 'FAILED') {
+    // Never a silent failure: the question stays on screen with the reason.
+    bubble.innerHTML = '<p style="margin:0;color:var(--out)">'
+      + esc(t.error || 'No answer came back.') + '</p>';
+  }
+}
+function pause(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+/**
+ * Ask, then poll. Never wait on the answer over one connection: the edge
+ * gives up on any response slower than 30 seconds and answers with a 500 of
+ * its own, and a specialist turn takes 12–60s. The question is stored, a
+ * worker answers it, and this polls the row every two seconds — three
+ * minutes at most, then it says so rather than spinning.
+ */
 async function ask(question) {
   if (asking || !question.trim()) return;
   asking = true;
   $('#askSend').disabled = true;
   $('#askBox').value = '';
+  $('#askBox').style.height = 'auto';
   turn('You', '<p>' + esc(question) + '</p>', 'me');
   var pending = turn('QuickBooks', '<p class="skel">Reading your books…</p>');
+  var bubble = pending.querySelector('.bubble');
   try {
     // `specialist` is deliberately not sent: Eesa pins it to this plugin, so a
     // page scoped to the books cannot ask another plugin's agent.
-    var r = await platform('ask_specialist', { question: question });
-    var answer = (r && (r.answer || r.final)) || '';
-    if (!answer && r && r.error) throw new Error(r.error);
-    pending.querySelector('.bubble').innerHTML =
-      answer ? md(answer)
-             : '<p>No answer came back. Try asking something narrower.</p>';
+    var sent = await platform('specialist_chat_send', { question: question });
+    if (!sent.ok) throw new Error(sent.error || 'Could not send that.');
+    var id = sent.turn.id, t = sent.turn;
+    for (var i = 0; i < 90 && t.status !== 'DONE' && t.status !== 'FAILED'; i++) {
+      await pause(2000);
+      if (i === 15) bubble.innerHTML = '<p class="skel">Still reading — a long report takes a while…</p>';
+      var st = await platform('specialist_chat_status', { turn_id: id });
+      if (st.ok) t = st.turn;
+    }
+    if (t.status !== 'DONE' && t.status !== 'FAILED') {
+      t = { status: 'FAILED', error: 'This is taking longer than three minutes. '
+            + 'It is still being worked on — reopen this tab in a moment to see it.' };
+    }
+    settle(bubble, t);
   } catch (e) {
-    // Never a silent failure: the question stays on screen with the reason.
-    pending.querySelector('.bubble').innerHTML =
-      '<p class="bad" style="margin:0;color:var(--out)">' + esc(e.message) + '</p>';
+    bubble.innerHTML = '<p style="margin:0;color:var(--out)">' + esc(e.message) + '</p>';
   } finally {
     asking = false;
     $('#askSend').disabled = false;
   }
+}
+/** Earlier questions, so the thread is a record rather than a scratchpad. */
+async function loadHistory() {
+  try {
+    var h = await platform('specialist_chat_history', { limit: 40 });
+    var thread = $('#thread');
+    thread.innerHTML = '';
+    (h.turns || []).forEach(function (t) {
+      turn('You', '<p>' + esc(t.question) + '</p>', 'me');
+      var b = turn('QuickBooks', '<p class="skel">Reading your books…</p>').querySelector('.bubble');
+      settle(b, t);
+      // A turn still in flight when the page opened: keep polling it.
+      if (t.status === 'QUEUED' || t.status === 'RUNNING') resume(t.id, b);
+    });
+    if ((h.turns || []).length) $('#askChips').hidden = true;
+  } catch (e) { /* history is a convenience; the composer still works */ }
+}
+async function resume(id, bubble) {
+  var t = { status: 'RUNNING' };
+  for (var i = 0; i < 90 && t.status !== 'DONE' && t.status !== 'FAILED'; i++) {
+    await pause(2000);
+    var st = await platform('specialist_chat_status', { turn_id: id });
+    if (st.ok) t = st.turn;
+  }
+  settle(bubble, t);
 }
 $('#askSend').addEventListener('click', function () { ask($('#askBox').value); });
 $('#askBox').addEventListener('input', function () {
@@ -784,6 +834,11 @@ function paintAccess(a) {
                                 : 'View only — nothing you do can change QuickBooks');
     rows += row('Through Eesa', 'View only. Anything that would change QuickBooks '
                                 + 'needs an approver to agree first.');
+    var names = (a.approvers || []).map(function (p) { return esc(p.name || p.email); });
+    rows += row('Changes are approved by',
+      names.length ? names.join(', ') + (a.is_approver ? ' — including you' : '')
+                   : 'Nobody yet. Until the workspace owner appoints an approver, '
+                     + 'nothing can change QuickBooks through Eesa.');
     rows += row('Noted', esc(whenChecked(a.age_days))
       + (a.entered_by ? ' by ' + esc(a.entered_by) : '')
       + (a.stale ? ' — worth re-checking' : ''));
@@ -810,6 +865,7 @@ async function boot() {
   paintChips();
   loadAll();
   loadApprovals();
+  loadHistory();
 }
 </script>
 </body>
