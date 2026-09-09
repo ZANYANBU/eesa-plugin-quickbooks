@@ -218,6 +218,26 @@ const server = http.createServer((req, res) => {
       realm_id: process.env.QUICKBOOKS_REALM_ID || null,
     });
   }
+  // The embedded UI. Unauthenticated ON PURPOSE: it is a static page holding no
+  // credential and no data. Eesa frames it and hands it a short-lived session
+  // token by postMessage; every figure it shows comes back through Eesa's
+  // gateway, which checks the person's recorded QuickBooks role first. Serving
+  // the HTML to an anonymous request reveals nothing but the layout.
+  if (req.method === "GET" && (req.url === "/app" || req.url.startsWith("/app?"))) {
+    try {
+      const html = fs.readFileSync(new URL("../public/app.html", import.meta.url));
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8",
+        // Framed by Eesa, and by nobody else.
+        "Content-Security-Policy": "frame-ancestors https://eesa.ai https://*.eesa.ai",
+        "Cache-Control": "no-store",
+      });
+      return res.end(html);
+    } catch (e) {
+      return send(res, 500, { error: "app_unavailable", detail: String(e && e.message) });
+    }
+  }
+
   if (req.method !== "POST") return send(res, 405, { error: "POST only" });
   if (TOKEN && req.headers["authorization"] !== "Bearer " + TOKEN) {
     return send(res, 401, {

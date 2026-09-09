@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>QuickBooks · Your numbers</title>
+<!--
+  Embedded plugin UI, loaded by Eesa's plugins/[slug]/app shell.
+
+  WHO THIS IS FOR
+    The accounting team, who do not say "endpoint", "role" or "tool". Every
+    label here is something a bookkeeper says out loud: "Money coming in",
+    "Who owes you", "What you owe". If a word would need explaining, it is the
+    wrong word.
+
+  NO CREDENTIAL EVER REACHES THIS PAGE
+    1. The Eesa shell posts { type:'eesa:session', token, theme, apiBase }.
+    2. Reads go to POST {eesa}/api/v1/gateway/plugin-ui-invoke/ with that
+       short-lived token. Eesa checks the person's recorded QuickBooks role,
+       injects this plugin's key server-side, and proxies the call.
+    3. So a person who is "Reports only" in QuickBooks sees exactly what a
+       "Reports only" person should see. The screen does not decide that.
+
+  THE ARGUMENT ENVELOPE IS NOT WHAT IT LOOKS LIKE
+    Intuit's tools take { params: {...} }, not the arguments directly. A bare
+    {} comes back "invalid_type ... path: ['params']", which reads like a bug in
+    this page. Every call below wraps its arguments. Do not "tidy" that away.
+-->
+<style>
+  :root {
+    --bg: #ffffff; --fg: #0f1720; --muted: #5b6b7a; --line: #e3e8ee;
+    --card: #ffffff; --in: #0a7d3f; --out: #b0341d; --accent: #1c7d64;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.1);
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117; --fg: #e7edf3; --muted: #9aa8b5; --line: #22303c;
+    --card: #131c25; --in: #3fbf77; --out: #f0806a; --accent: #4bbfa0;
+    --shadow: none;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 20px 18px 64px; }
+  h1 { font-size: 21px; margin: 0 0 2px; letter-spacing: -.01em; }
+  .sub { color: var(--muted); font-size: 13.5px; margin: 0 0 18px; }
+  .bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+  select, button {
+    font: inherit; color: var(--fg); background: var(--card);
+    border: 1px solid var(--line); border-radius: 8px; padding: 7px 11px; cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button[disabled] { opacity: .55; cursor: default; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 15px 16px; box-shadow: var(--shadow);
+  }
+  .card h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .05em;
+             color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+  .big { font-size: 27px; font-weight: 650; letter-spacing: -.02em;
+         font-variant-numeric: tabular-nums; }
+  .in { color: var(--in); } .out { color: var(--out); }
+  .note { color: var(--muted); font-size: 12.5px; margin-top: 5px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); font-size: 14px; }
+  th { color: var(--muted); font-weight: 600; font-size: 12.5px; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .section { margin-top: 26px; }
+  .section > h3 { font-size: 15px; margin: 0 0 3px; }
+  .section > p { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+  .msg { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px;
+         color: var(--muted); background: var(--card); }
+  .msg.bad { border-color: #d9534f55; color: var(--out); }
+  .skel { color: var(--muted); }
+  .overflow { overflow-x: auto; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="co">Your numbers</h1>
+  <p class="sub" id="sub">Straight from QuickBooks. Nothing here changes anything in QuickBooks.</p>
+
+  <div class="bar">
+    <label for="period" class="skel">Show</label>
+    <select id="period">
+      <option value="this-month">This month</option>
+      <option value="last-month" selected>Last month</option>
+      <option value="this-quarter">This quarter</option>
+      <option value="this-year">This year so far</option>
+    </select>
+    <button id="refresh" class="primary">Refresh</button>
+    <span id="status" class="skel"></span>
+  </div>
+
+  <div class="grid" id="tiles">
+    <div class="card"><h2>Money coming in</h2><div class="big in" id="income">—</div>
+      <div class="note">Sales invoiced in this period</div></div>
+    <div class="card"><h2>Money going out</h2><div class="big out" id="expense">—</div>
+      <div class="note">Bills and expenses in this period</div></div>
+    <div class="card"><h2>Left over</h2><div class="big" id="net">—</div>
+      <div class="note">What is left after money out</div></div>
+  </div>
+
+  <div class="section">
+    <h3>Who owes you</h3>
+    <p>Customers who have not paid yet, oldest first.</p>
+    <div class="overflow"><div id="ar" class="msg skel">Loading…</div></div>
+  </div>
+
+  <div class="section">
+    <h3>What you owe</h3>
+    <p>Bills you have not paid yet.</p>
+    <div class="overflow"><div id="ap" class="msg skel">Loading…</div></div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ── session, handed in by the Eesa shell ────────────────────────────────
+var TOKEN = null, EESA = null, booted = false;
+var EESA_FALLBACK = (window.EESA_ORIGIN || 'https://eesa.ai');
+
+window.addEventListener('message', function (ev) {
+  var m = ev.data || {};
+  if (m.type !== 'eesa:session' || !m.token) return;
+  // Prefer an explicit apiBase. ev.origin only holds when a cross-origin Eesa
+  // parent framed us; loaded top-level (the mobile WebView) it is OUR OWN
+  // origin, and we would POST at this plugin's own server, which has no such
+  // route — a 404 that reads as the page being broken.
+  EESA = (typeof m.apiBase === 'string' && /^https?:\/\//.test(m.apiBase))
+    ? m.apiBase.replace(/\/+$/, '')
+    : (ev.origin && ev.origin !== window.location.origin ? ev.origin : EESA_FALLBACK);
+  TOKEN = m.token;
+  if (m.theme) document.documentElement.setAttribute('data-theme', m.theme);
+  if (!booted) { booted = true; loadAll(); }
+});
+try { parent.postMessage({ type: 'eesa:plugin-ready' }, '*'); } catch (e) {}
+
+function $(s) { return document.querySelector(s); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+  return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+/** Every Intuit tool takes { params: {...} }. A bare {} is rejected. */
+async function invoke(tool, params) {
+  if (!EESA || !TOKEN) throw new Error('Not signed in yet.');
+  var res = await fetch(EESA + '/api/v1/gateway/plugin-ui-invoke/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN },
+    body: JSON.stringify({ tool: tool, args: { params: params || {} } }),
+  });
+  if (!res.ok) {
+    var detail = '';
+    try { detail = (await res.json()).detail || ''; } catch (e) {}
+    // Said the way a bookkeeper would need to hear it, not as a status code.
+    if (res.status === 403) {
+      throw new Error('Your QuickBooks access does not cover this. Ask whoever '
+        + 'looks after QuickBooks to check your role.');
+    }
+    throw new Error(detail || 'QuickBooks did not answer. Try Refresh in a moment.');
+  }
+  return res.json();
+}
+
+/** Intuit returns its reports as JSON inside a text block. */
+function payload(out) {
+  try {
+    var c = (out && (out.content || (out.data && out.data.content))) || [];
+    for (var i = 0; i < c.length; i++) {
+      if (c[i] && typeof c[i].text === 'string') {
+        try { return JSON.parse(c[i].text); } catch (e) { /* keep looking */ }
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+function money(n) {
+  var v = Number(n);
+  if (!isFinite(v)) return '—';
+  return v.toLocaleString(undefined, { style: 'currency', currency: 'USD',
+                                       maximumFractionDigits: 0 });
+}
+
+/** Pull a named total out of a QuickBooks report, wherever it sits. */
+function findTotal(node, wanted) {
+  var hit = null;
+  (function walk(n) {
+    if (hit !== null || !n || typeof n !== 'object') return;
+    if (Array.isArray(n)) { n.forEach(walk); return; }
+    var label = n.group || n.ColData && n.ColData[0] && n.ColData[0].value;
+    if (typeof label === 'string' && label.toLowerCase() === wanted) {
+      var cols = (n.Summary && n.Summary.ColData) || n.ColData;
+      if (cols && cols.length > 1) {
+        var v = Number(String(cols[cols.length - 1].value || '').replace(/[^0-9.-]/g, ''));
+        if (isFinite(v)) { hit = v; return; }
+      }
+    }
+    Object.keys(n).forEach(function (k) { walk(n[k]); });
+  })(node);
+  return hit;
+}
+
+function periodDates(key) {
+  var now = new Date(), y = now.getFullYear(), m = now.getMonth();
+  function iso(d) { return d.toISOString().slice(0, 10); }
+  if (key === 'this-month') return [iso(new Date(y, m, 1)), iso(now)];
+  if (key === 'last-month') return [iso(new Date(y, m - 1, 1)), iso(new Date(y, m, 0))];
+  if (key === 'this-quarter') {
+    var qs = Math.floor(m / 3) * 3;
+    return [iso(new Date(y, qs, 1)), iso(now)];
+  }
+  return [iso(new Date(y, 0, 1)), iso(now)];
+}
+
+function agingTable(report, whoLabel) {
+  var rows = [];
+  (function walk(n) {
+    if (!n || typeof n !== 'object') return;
+    if (Array.isArray(n)) { n.forEach(walk); return; }
+    if (n.ColData && n.ColData.length > 1) {
+      var name = String(n.ColData[0].value || '').trim();
+      var total = Number(String(n.ColData[n.ColData.length - 1].value || '')
+        .replace(/[^0-9.-]/g, ''));
+      if (name && isFinite(total) && total !== 0 && name.toLowerCase() !== 'total') {
+        rows.push([name, total]);
+      }
+    }
+    Object.keys(n).forEach(function (k) { walk(n[k]); });
+  })(report);
+  if (!rows.length) return '<div class="msg">Nothing outstanding. </div>';
+  rows.sort(function (a, b) { return b[1] - a[1]; });
+  var html = '<table><thead><tr><th>' + esc(whoLabel)
+    + '</th><th class="n">Amount</th></tr></thead><tbody>';
+  rows.slice(0, 15).forEach(function (r) {
+    html += '<tr><td>' + esc(r[0]) + '</td><td class="n">' + money(r[1]) + '</td></tr>';
+  });
+  return html + '</tbody></table>';
+}
+
+async function loadAll() {
+  var period = $('#period').value;
+  var d = periodDates(period);
+  $('#status').textContent = 'Checking QuickBooks…';
+  $('#refresh').disabled = true;
+
+  try {
+    var co = await invoke('get_company_info', {});
+    var info = payload(co);
+    if (info && info.CompanyName) $('#co').textContent = info.CompanyName;
+  } catch (e) { /* the name is nice to have, not worth failing over */ }
+
+  try {
+    var pl = payload(await invoke('get_profit_and_loss',
+      { start_date: d[0], end_date: d[1] }));
+    var income = findTotal(pl, 'income');
+    var expense = findTotal(pl, 'expenses');
+    if (expense === null) expense = findTotal(pl, 'total expenses');
+    var net = findTotal(pl, 'net income');
+    if (net === null && income !== null && expense !== null) net = income - expense;
+    $('#income').textContent = money(income);
+    $('#expense').textContent = money(expense);
+    $('#net').textContent = money(net);
+    $('#net').className = 'big ' + (Number(net) < 0 ? 'out' : 'in');
+    $('#status').textContent = '';
+  } catch (e) {
+    $('#status').textContent = '';
+    $('#tiles').innerHTML = '<div class="msg bad">' + esc(e.message) + '</div>';
+  }
+
+  try {
+    $('#ar').outerHTML = '<div id="ar">'
+      + agingTable(payload(await invoke('get_aged_receivables', {})), 'Customer') + '</div>';
+  } catch (e) {
+    $('#ar').outerHTML = '<div id="ar" class="msg bad">' + esc(e.message) + '</div>';
+  }
+
+  try {
+    $('#ap').outerHTML = '<div id="ap">'
+      + agingTable(payload(await invoke('get_aged_payables', {})), 'Supplier') + '</div>';
+  } catch (e) {
+    $('#ap').outerHTML = '<div id="ap" class="msg bad">' + esc(e.message) + '</div>';
+  }
+
+  $('#refresh').disabled = false;
+}
+
+$('#refresh').addEventListener('click', function () { if (TOKEN) loadAll(); });
+$('#period').addEventListener('change', function () { if (TOKEN) loadAll(); });
+</script>
+</body>
+</html>

@@ -39,6 +39,11 @@ COPY gateway/package.json ./gateway/package.json
 RUN cd gateway && npm install --omit=dev
 COPY gateway/gateway.mjs ./gateway/gateway.mjs
 
+# The embedded UI. gateway.mjs reads ../public/app.html relative to itself, so
+# this must land at /app/public — copying it into gateway/ would 500 the /app
+# route with a path that looks right in the repo.
+COPY public/app.html ./public/app.html
+
 # Where the rotated refresh token lives. MUST be a mounted volume — see the
 # comment in gateway.mjs. Without one the token is lost on every redeploy and
 # the connection dies within a day, which is exactly how the previous
