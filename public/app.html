@@ -246,7 +246,24 @@ function sumGroups(report, groups) {
 
 function periodDates(key) {
   var now = new Date(), y = now.getFullYear(), m = now.getMonth();
-  function iso(d) { return d.toISOString().slice(0, 10); }
+  /**
+   * The date as the person reading the screen would write it.
+   *
+   * NOT toISOString(), which converts to UTC first. `new Date(y, m, 1)` is
+   * local midnight, so anywhere east of Greenwich it lands on the previous
+   * day in UTC and every period silently shifted a day early: at GMT+0530 on
+   * 9 September 2026 "Last month" asked QuickBooks for 2026-07-31 to
+   * 2026-08-30 — wrong at both ends of a month boundary — and "This year so
+   * far" began on 2025-12-31, pulling a prior-year day into a year-to-date
+   * figure. It reported US$44,840 of income for August against the real
+   * US$56,834.87, with nothing on screen to suggest the window was not the
+   * one named in the dropdown.
+   */
+  function iso(d) {
+    return d.getFullYear() + '-'
+      + String(d.getMonth() + 1).padStart(2, '0') + '-'
+      + String(d.getDate()).padStart(2, '0');
+  }
   if (key === 'this-month') return [iso(new Date(y, m, 1)), iso(now)];
   if (key === 'last-month') return [iso(new Date(y, m - 1, 1)), iso(new Date(y, m, 0))];
   if (key === 'this-quarter') {
