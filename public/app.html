@@ -99,7 +99,7 @@
     <div class="card"><h2>Money coming in</h2><div class="big in" id="income">—</div>
       <div class="note">Sales invoiced in this period</div></div>
     <div class="card"><h2>Money going out</h2><div class="big out" id="expense">—</div>
-      <div class="note">Bills and expenses in this period</div></div>
+      <div class="note">Costs, expenses and bills in this period</div></div>
     <div class="card"><h2>Left over</h2><div class="big" id="net">—</div>
       <div class="note">What is left after money out</div></div>
   </div>
@@ -227,6 +227,23 @@ function findTotal(node, wanted) {
   return hit;
 }
 
+/**
+ * Add up the named report sections. Names are QuickBooks' own `group` keys
+ * ("Income", "COGS", "OtherExpenses", …), which are stable across companies —
+ * unlike the row labels, which a company can rename.
+ *
+ * Returns null when none of them are present, so a missing section reads as
+ * "we don't know" rather than as a confident zero.
+ */
+function sumGroups(report, groups) {
+  var total = null;
+  groups.forEach(function (g) {
+    var v = findTotal(report, g);
+    if (v !== null) total = (total === null ? 0 : total) + v;
+  });
+  return total;
+}
+
 function periodDates(key) {
   var now = new Date(), y = now.getFullYear(), m = now.getMonth();
   function iso(d) { return d.toISOString().slice(0, 10); }
@@ -279,10 +296,20 @@ async function loadAll() {
   try {
     var pl = payload(await invoke('get_profit_and_loss',
       { start_date: d[0], end_date: d[1] }));
-    var income = findTotal(pl, 'income');
-    var expense = findTotal(pl, 'expenses');
-    if (expense === null) expense = findTotal(pl, 'total expenses');
-    var net = findTotal(pl, 'net income');
+    // Every section that is money in, and every section that is money out.
+    // A QuickBooks P&L splits what goes out three ways — cost of goods sold,
+    // expenses, other expenses — and this card used to show only the middle
+    // one. On the sandbox that read US$47,677 against US$209,937 coming in and
+    // US$158,939 left over: three tiles side by side that a bookkeeper cannot
+    // subtract. With all three sections counted the identity holds exactly,
+    //   209,937.27 - (405.00 + 47,677.42 + 2,916.00) = 158,938.85
+    // which is QuickBooks' own Net Income to the cent.
+    var income  = sumGroups(pl, ['income', 'otherincome']);
+    var expense = sumGroups(pl, ['cogs', 'expenses', 'otherexpenses']);
+    // The bottom line is QuickBooks' own figure, never our arithmetic — the
+    // subtraction is a fallback for a layout that omits it.
+    var net = findTotal(pl, 'netincome');
+    if (net === null) net = findTotal(pl, 'net income');
     if (net === null && income !== null && expense !== null) net = income - expense;
     $('#income').textContent = money(income);
     $('#expense').textContent = money(expense);
