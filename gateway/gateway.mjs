@@ -34,8 +34,23 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 const PORT = parseInt(process.env.GATEWAY_PORT || "8080", 10);
 const TOKEN = process.env.GATEWAY_TOKEN || "";
 const MCP_DIR = process.env.QB_MCP_DIR || "/app";
+import crypto from "node:crypto";
+
 const TOKEN_STORE = process.env.QB_TOKEN_STORE || "/data/qb-token.json";
 const ENVIRONMENT = process.env.QUICKBOOKS_ENVIRONMENT || "sandbox";
+// Where Intuit sends the person back. MUST be registered on the Intuit app, and
+// for PRODUCTION keys it must be https — Intuit only permits http://localhost on
+// development keys, which is why connecting real books cannot use the localhost
+// flow that works against a sandbox.
+const REDIRECT_URI =
+  process.env.QB_OAUTH_REDIRECT_URI ||
+  (process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/oauth/callback`
+    : "");
+// Shared secret on the connect link. Without it, anyone who found this URL
+// could point the plugin at a QuickBooks company of their own choosing.
+const CONNECT_TOKEN = process.env.QB_CONNECT_TOKEN || "";
+let pendingState = null;
 
 let client = null;
 let connecting = null;
@@ -197,7 +212,8 @@ function send(res, status, obj) {
   res.end(b);
 }
 
-const server = http.createServer((req, res) => {
+// async because the OAuth callback below exchanges a code before replying.
+const server = http.createServer(async (req, res) => {
   // Liveness. Deliberately unauthenticated and deliberately NOT touching
   // Intuit — Coolify needs it to answer during boot.
   if (req.method === "GET" && req.url === "/health") {
@@ -218,6 +234,102 @@ const server = http.createServer((req, res) => {
       realm_id: process.env.QUICKBOOKS_REALM_ID || null,
     });
   }
+  // ── Connecting a QuickBooks company ────────────────────────────────────
+  //
+  // The plugin does its own OAuth, for a reason that only shows up in
+  // production: Intuit requires redirect URIs to be HTTPS there, and only
+  // allows http://localhost on DEVELOPMENT keys. The localhost dance that works
+  // against a sandbox simply cannot be used against real books.
+  //
+  // Doing it here also means the refresh token never travels: it is written
+  // straight into this container's token store, which is the only thing that
+  // reads it. Nothing has to hand a standing grant to somebody else's books
+  // across a system boundary.
+  //
+  // Guarded by CONNECT_TOKEN — without it anyone who found this URL could point
+  // the plugin at a company of their own choosing.
+  if (req.method === "GET" && req.url.startsWith("/oauth/start")) {
+    const q = new URL(req.url, "http://x").searchParams;
+    if (!CONNECT_TOKEN || q.get("key") !== CONNECT_TOKEN) {
+      return send(res, 403, { error: "forbidden" });
+    }
+    const cid = process.env.QUICKBOOKS_CLIENT_ID;
+    if (!cid) return send(res, 500, { error: "QUICKBOOKS_CLIENT_ID is not set" });
+    pendingState = crypto.randomBytes(16).toString("hex");
+    const p = new URLSearchParams({
+      client_id: cid,
+      response_type: "code",
+      scope: "com.intuit.quickbooks.accounting openid profile email",
+      redirect_uri: REDIRECT_URI,
+      state: pendingState,
+      // Force a fresh sign-in. An inherited Intuit session authorises as
+      // whoever the browser already knows, which is how a connection ends up
+      // owned by the wrong account without anybody noticing.
+      prompt: "login",
+    });
+    res.writeHead(302, { Location: "https://appcenter.intuit.com/connect/oauth2?" + p });
+    return res.end();
+  }
+
+  if (req.method === "GET" && req.url.startsWith("/oauth/callback")) {
+    const q = new URL(req.url, "http://x").searchParams;
+    const html = (msg) =>
+      `<!doctype html><meta charset=utf-8><style>body{font:16px system-ui;padding:40px;max-width:32em}</style>${msg}`;
+    if (q.get("error")) {
+      res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+      return res.end(html(`<h3>QuickBooks refused the connection</h3><p>${q.get("error")}</p>`));
+    }
+    if (!pendingState || q.get("state") !== pendingState) {
+      res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+      return res.end(html("<h3>That link has expired</h3><p>Start again from the connect link.</p>"));
+    }
+    pendingState = null;
+    try {
+      const auth = Buffer.from(
+        process.env.QUICKBOOKS_CLIENT_ID + ":" + process.env.QUICKBOOKS_CLIENT_SECRET,
+      ).toString("base64");
+      const r = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
+        method: "POST",
+        headers: {
+          Authorization: "Basic " + auth,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: q.get("code"),
+          redirect_uri: REDIRECT_URI,
+        }).toString(),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!j.refresh_token) {
+        res.writeHead(502, { "Content-Type": "text/html; charset=utf-8" });
+        // Never echo the body: it can carry the grant.
+        return res.end(html(`<h3>QuickBooks did not issue a token</h3><p>HTTP ${r.status}.</p>`));
+      }
+      currentRefreshToken = j.refresh_token;
+      process.env.QUICKBOOKS_REFRESH_TOKEN = j.refresh_token;
+      const realm = q.get("realmId");
+      if (realm) process.env.QUICKBOOKS_REALM_ID = realm;
+      const saved = persistToken(j.refresh_token);
+      lastRefreshAt = new Date().toISOString();
+      lastRefreshError = saved ? null : "persist failed";
+      // Drop the child so the next call respawns it with the new token — the
+      // same reason a rotation drops it. A child holds a COPY of process.env
+      // from spawn time and would keep using the old grant until it died.
+      try { if (client) { await client.close?.(); } } catch (e) {}
+      client = null;
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      return res.end(html(
+        `<h3>QuickBooks connected</h3><p>Company <code>${realm || "?"}</code>, ` +
+        `${ENVIRONMENT}. ${saved ? "Saved." : "<b>NOT saved — the /data volume is missing.</b>"}</p>` +
+        `<p>You can close this window.</p>`));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
+      return res.end(html(`<h3>Could not complete the connection</h3><p>${String(e && e.message)}</p>`));
+    }
+  }
+
   // The embedded UI. Unauthenticated ON PURPOSE: it is a static page holding no
   // credential and no data. Eesa frames it and hands it a short-lived session
   // token by postMessage; every figure it shows comes back through Eesa's

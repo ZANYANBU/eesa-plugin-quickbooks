@@ -92,6 +92,33 @@ current.
 > a new hat. `GET /health/token` reports `store_present` — if that is `false`
 > after a deploy, the volume is missing.
 
+
+## Connecting a company (and why this is not the localhost flow)
+
+`GET /oauth/start?key=$QB_CONNECT_TOKEN` sends the person to Intuit;
+`GET /oauth/callback` takes the code, exchanges it, and writes the refresh
+token straight into the token store. The plugin does this itself for a reason
+that only appears in production: **Intuit requires redirect URIs to be HTTPS
+for production keys** and permits `http://localhost` only on development ones.
+The localhost flow that works against a sandbox cannot be used on real books.
+
+Doing it here also means the refresh token never travels — it is written into
+the only container that reads it, rather than being handed across a system
+boundary.
+
+Register the callback on the Intuit app, under the keys you are using:
+
+    https://<this service>/oauth/callback
+
+Set `QB_CONNECT_TOKEN` to a secret of your choosing, `QB_OAUTH_REDIRECT_URI` if
+the public domain is not what Railway reports, and open
+`/oauth/start?key=…` **as the company's primary or company admin** — no other
+QuickBooks role can connect an app at all.
+
+⚠️ Sandbox and production are different apps with different keys, and a sandbox
+realm with `QUICKBOOKS_ENVIRONMENT=production` is a 401 that reads like a
+credential problem.
+
 ## Endpoints
 
 | Path | Auth | Purpose |
@@ -99,6 +126,9 @@ current.
 | `GET /health` | none | Liveness. Does not touch Intuit, so it answers during boot. |
 | `GET /health/token` | none | **Readiness.** Whether the credential is actually alive. `/health` stays green with a dead token — alert on this one. |
 | `POST /` | `Bearer $GATEWAY_TOKEN` | JSON-RPC: `tools/list`, `tools/call`, `ping` |
+| `GET /app` | none | The embedded UI. Static, holds no data; framed by Eesa. |
+| `GET /oauth/start` | `?key=$QB_CONNECT_TOKEN` | Begin connecting a company. |
+| `GET /oauth/callback` | Intuit | Stores the refresh token. Register this URL. |
 
 ## Environment
 
