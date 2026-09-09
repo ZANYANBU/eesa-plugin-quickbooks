@@ -180,12 +180,42 @@ async function connect() {
   });
   const c = new Client({ name: "eesa-qbo-gateway", version: "1.0.0" }, { capabilities: {} });
   await c.connect(transport);
+  spawns += 1;
   c.onclose = () => {
     console.error("[gateway] QBO MCP transport closed; will reconnect on next call");
     if (client === c) client = null;
   };
   console.error(`[gateway] connected to QBO MCP (environment=${ENVIRONMENT})`);
   return c;
+}
+
+let spawns = 0;
+let drops = 0;
+
+/**
+ * Let go of a child — and KILL it.
+ *
+ * The error path used to set `client = null` and nothing else. The transport
+ * stayed open, the `node dist/index.js` underneath it stayed alive, and the
+ * next call spawned another. Every "invalid arguments" error — a tool doing
+ * its job — leaked one Intuit MCP server. A sweep of the tool list on
+ * 2026-09-10 leaked about two dozen per pass; three passes and the container
+ * ran out of memory, every spawn failed, and every call answered
+ * "Connection closed" until a redeploy. /health said ok the whole time.
+ */
+function drop(c, why) {
+  if (client === c) client = null;
+  drops += 1;
+  console.error(`[gateway] dropping QBO MCP child (${why}); drops=${drops}`);
+  Promise.resolve().then(() => c.close()).catch(() => {});
+}
+
+/** Only a dead transport is a reason to drop the child. A tool refusing its
+ *  arguments is the child working. */
+function transportDead(e) {
+  return /Connection closed|Not connected|EPIPE|ECONNRESET|write after end/i.test(
+    String((e && e.message) || e),
+  );
 }
 
 async function ensure() {
@@ -217,7 +247,12 @@ const server = http.createServer(async (req, res) => {
   // Liveness. Deliberately unauthenticated and deliberately NOT touching
   // Intuit — Coolify needs it to answer during boot.
   if (req.method === "GET" && req.url === "/health") {
-    return send(res, 200, { ok: true, plugin: "quickbooks", connected: !!client, environment: ENVIRONMENT });
+    return send(res, 200, {
+      ok: true, plugin: "quickbooks", connected: !!client, environment: ENVIRONMENT,
+      // How many children this container has started and let go. A number
+      // that climbs with every error is the leak that took the service down.
+      child_spawns: spawns, child_drops: drops,
+    });
   }
   // Readiness. This is the one that tells you the token is alive, and the one
   // worth alerting on — /health stays green with a dead credential.
@@ -376,29 +411,45 @@ const server = http.createServer(async (req, res) => {
     }
     const id = msg.id ?? null;
     const method = msg.method;
+    if (!["tools/list", "tools/call", "ping", "initialize"].includes(method)) {
+      return send(res, 200, {
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32601, message: "method not found: " + method },
+      });
+    }
+    const run = async (c) => {
+      if (method === "tools/list") return c.listTools();
+      if (method === "tools/call") {
+        return c.callTool({ name: msg.params?.name, arguments: msg.params?.arguments || {} });
+      }
+      return { ok: true };
+    };
+    // A child that has died is dropped — killed, not abandoned — and the call
+    // is made once more on a fresh one, so one dead process costs a second and
+    // not an outage. Any other error is the child answering, and is passed on.
+    let c;
     try {
-      const c = await ensure();
-      let result;
-      if (method === "tools/list") {
-        result = await c.listTools();
-      } else if (method === "tools/call") {
-        result = await c.callTool({
-          name: msg.params?.name,
-          arguments: msg.params?.arguments || {},
-        });
-      } else if (method === "ping" || method === "initialize") {
-        result = { ok: true };
-      } else {
+      c = await ensure();
+      const result = await run(c);
+      return send(res, 200, { jsonrpc: "2.0", id, result });
+    } catch (e) {
+      if (!transportDead(e)) {
         return send(res, 200, {
           jsonrpc: "2.0",
           id,
-          error: { code: -32601, message: "method not found: " + method },
+          error: { code: -32000, message: String((e && e.message) || e) },
         });
       }
-      send(res, 200, { jsonrpc: "2.0", id, result });
+      if (c) drop(c, "transport dead: " + String((e && e.message) || e).slice(0, 60));
+    }
+    try {
+      const fresh = await ensure();
+      const result = await run(fresh);
+      return send(res, 200, { jsonrpc: "2.0", id, result });
     } catch (e) {
-      if (client) client = null;
-      send(res, 200, {
+      if (client && transportDead(e)) drop(client, "dead again after respawn");
+      return send(res, 200, {
         jsonrpc: "2.0",
         id,
         error: { code: -32000, message: String((e && e.message) || e) },
