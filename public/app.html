@@ -938,10 +938,15 @@ var QUEUE = null;
 async function loadApprovals() {
   try {
     QUEUE = await platform('quickbooks_changes', { limit: 25 });
-    var waiting = QUEUE.waiting_on_me || [], mine = QUEUE.my_requests || [];
-    $('#apprMine').innerHTML = waiting.length
+    var waiting = QUEUE.waiting_on_me || [], mine = QUEUE.my_requests || [], failed = QUEUE.failed || [];
+    // A send that failed is nobody's pending request; an approver sees it
+    // here so they can try it again.
+    $('#apprMine').innerHTML = (waiting.length
       ? waiting.map(function (c) { return changeCard(c, false); }).join('')
-      : '<div class="msg">Nothing is waiting on you.</div>';
+      : '<div class="msg">Nothing is waiting on you.</div>')
+      + (failed.length
+          ? '<div class="glabel">Sends that failed</div>' + failed.map(function (c) { return changeCard(c, false); }).join('')
+          : '');
     $('#apprOwn').innerHTML = mine.length
       ? mine.map(function (c) { return changeCard(c, true); }).join('')
       : '<div class="msg">You have not asked for any changes.</div>';
@@ -1076,7 +1081,7 @@ $('#tab-approvals').addEventListener('click', async function (e) {
   var b = e.target.closest('button[data-act]');
   if (!b || b.disabled) return;
   var id = b.dataset.id, act = b.dataset.act;
-  var all = (QUEUE.waiting_on_me || []).concat(QUEUE.my_requests || []);
+  var all = (QUEUE.waiting_on_me || []).concat(QUEUE.my_requests || [], QUEUE.failed || []);
   var c = all.filter(function (x) { return x.id === id; })[0];
   if (!c) return;
   var open = { approve: approveDialog, reject: rejectDialog, cancel: cancelDialog, retry: retryDialog }[act];
