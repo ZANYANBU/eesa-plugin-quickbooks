@@ -824,6 +824,31 @@ function changeCard(c, mine) {
         + '</span><span class="val">' + money(lineAmt(l)) + '</span></div>';
     }).join('') + '</div>';
   }
+  // An edit shows what is there now and what will be there after; a
+  // deletion says plainly what disappears. Neither is a creation and the
+  // card must not read like one.
+  var op = c.operation || 'create';
+  var opWord = op === 'update' ? 'Edit' : (op === 'delete' || op === 'void') ? 'Delete' : '';
+  var beforeBits = [];
+  if (c.before && typeof c.before === 'object') {
+    if (c.before.DocNumber) beforeBits.push('No. ' + esc(c.before.DocNumber));
+    if (c.before.TxnDate) beforeBits.push('dated ' + esc(c.before.TxnDate));
+    if (c.before.TotalAmt != null) beforeBits.push('total ' + money(c.before.TotalAmt));
+    if (c.before.Balance != null && Number(c.before.Balance) !== Number(c.before.TotalAmt)) beforeBits.push('balance ' + money(c.before.Balance));
+  }
+  var opBlock = '';
+  if (op === 'update' && Array.isArray(c.changes) && c.changes.length) {
+    opBlock = '<div class="lines"><div class="line" style="font-weight:600"><span>What changes</span><span class="val">before → after</span></div>'
+      + c.changes.map(function (ch) {
+          return '<div class="line"><span>' + esc(ch.field) + '</span><span class="val">'
+            + esc(ch.before === '' ? '—' : ch.before) + ' → <b>' + esc(ch.after === '' ? '—' : ch.after) + '</b></span></div>';
+        }).join('') + '</div>'
+      + (beforeBits.length ? '<div class="meta">As it is now: ' + beforeBits.join(' · ') + '</div>' : '');
+  } else if (op === 'delete' || op === 'void') {
+    opBlock = '<div class="strip bad"><b>This will ' + (c.kind === 'invoice' ? 'void' : 'delete') + ' the ' + esc(c.kind || 'record')
+      + (beforeBits.length ? ' — ' + beforeBits.join(' · ') : '') + '</b>'
+      + '<div>Cannot be undone from Eesa. Approving needs the amount typed back.</div></div>';
+  }
   var val = '';
   if (c.validation && c.validation.errors && c.validation.errors.length) {
     val = '<div class="strip bad"><b>This cannot be approved yet</b>'
@@ -843,7 +868,8 @@ function changeCard(c, mine) {
   }
   var outcome = '';
   if (c.status === 'VERIFIED' || c.status === 'EXECUTED') {
-    outcome = '<div class="strip ok"><b>' + esc(c.kind || 'Change') + ' created in QuickBooks</b>'
+    var done = op === 'update' ? ' changed in QuickBooks' : (op === 'delete' || op === 'void') ? (c.kind === 'invoice' ? ' voided in QuickBooks' : ' deleted from QuickBooks') : ' created in QuickBooks';
+    outcome = '<div class="strip ok"><b>' + esc(c.kind || 'Change') + done + '</b>'
       + (c.quickbooks_id ? '<div>QuickBooks ID ' + esc(c.quickbooks_id)
         + (c.quickbooks_doc_number ? ' · No. ' + esc(c.quickbooks_doc_number) : '') + '</div>' : '')
       + '<div>' + (c.status === 'VERIFIED'
@@ -870,9 +896,10 @@ function changeCard(c, mine) {
   }
   return '<div class="change" style="border-left:5px solid ' + rail + '">'
     + '<div class="chead"><div><span class="pill ' + pillClass(c.status) + '">' + esc(c.status_label || c.status) + '</span>'
+    + (opWord ? ' <span class="pill">' + opWord + '</span>' : '')
     + ' <b>' + esc(c.summary) + '</b>' + who + by + '</div>'
     + '<div class="amt">' + money(c.amount) + '</div></div>'
-    + lines + val + req + outcome + actions + '</div>';
+    + (op === 'create' ? lines : '') + opBlock + val + req + outcome + actions + '</div>';
 }
 function pillClass(st) {
   return st === 'PENDING' ? 'wait' : (st === 'VERIFIED' || st === 'EXECUTED' || st === 'APPROVED') ? 'yes'
