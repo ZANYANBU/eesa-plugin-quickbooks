@@ -191,6 +191,23 @@
   .strip.bad { background: rgba(196,53,28,.08); color: var(--out); }
   .strip.warn { background: rgba(178,80,0,.08); color: var(--warn); }
   .strip.ok { background: rgba(27,138,62,.08); color: var(--in); }
+  /* The moment money moves: a real dialog, not the browser's prompt. */
+  .veil { position: fixed; inset: 0; background: rgba(20,24,28,.45); display: flex;
+          align-items: center; justify-content: center; padding: 20px; z-index: 50; }
+  .dlg { background: var(--group); color: var(--text); border-radius: 14px; box-shadow: 0 20px 60px rgba(0,0,0,.25);
+         width: min(520px, 100%); max-height: 90vh; overflow: auto; padding: 20px 20px 16px; }
+  .dlg h2 { margin: 0 0 4px; font-size: 18px; }
+  .dlg .sub { margin: 0 0 14px; }
+  .dlg .facts { border: 1px solid var(--sep); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; }
+  .dlg .fact { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 14px; }
+  .dlg .fact.amt { border-top: 1px solid var(--sep); margin-top: 6px; padding-top: 8px; font-weight: 700; font-size: 20px; }
+  .dlg label { display: block; font-size: 13px; color: var(--label); margin: 10px 0 4px; }
+  .dlg input, .dlg textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 9px 11px;
+         border: 1px solid var(--sep); border-radius: 9px; background: var(--bg); color: var(--text); }
+  .dlg .hint { font-size: 12px; color: var(--label3); margin-top: 4px; }
+  .dlg .err { color: var(--out); font-size: 13px; margin-top: 8px; }
+  .dlg .foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .btn.danger { background: var(--out); color: #fff; border-color: transparent; }
   .actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px;
              flex-wrap: wrap; margin-top: 12px; }
   .actions .meta { flex: 1; text-align: left; }
@@ -884,7 +901,14 @@ function changeCard(c, mine) {
       + '</div>' + (r ? '<div>by ' + esc(r.by) + '</div>' : '') + '</div>';
   }
   var actions = '';
-  if (c.status === 'PENDING' && !mine) {
+  if (c.status === 'FAILED' && c.can_retry) {
+    var unknown = c.last_execution && c.last_execution.status === 'INDETERMINATE';
+    actions = '<div class="actions">'
+      + '<span class="meta">' + (unknown
+          ? 'The last attempt\'s outcome was unknown. Eesa will look in QuickBooks for the document before sending again.'
+          : 'Attempt ' + esc(String((c.last_execution && c.last_execution.attempt) || 1)) + ' failed. The approvals still stand; the same change is sent again.') + '</span>'
+      + '<button class="btn primary" data-act="retry" data-id="' + esc(c.id) + '">Try again</button></div>';
+  } else if (c.status === 'PENDING' && !mine) {
     var blocked = (c.blockers || []).length ? c.blockers[0] : '';
     actions = '<div class="actions">'
       + (blocked ? '<span class="meta">' + esc(blocked) + '</span>' : '')
@@ -934,6 +958,120 @@ async function loadApprovals() {
     $('#apprOwn').innerHTML = '';
   }
 }
+// ── the dialogs ──────────────────────────────────────────────────────────
+// Approving is the moment money moves, so the dialog restates the change in
+// full rather than assuming the person still has the card in view, and for a
+// high-risk change it makes them type the amount back. Typing the figure is
+// not theatre: it forces the approver to read the number, which is the one
+// failure a policy engine cannot catch — clicking through $50,000 they read as
+// $5,000. Turning down needs a reason: it goes to the person who asked and is
+// the only thing they have to work from.
+function normalizeAmount(t) {
+  var v = parseFloat(String(t || '').replace(/[^0-9.\-]/g, ''));
+  return isFinite(v) ? v.toFixed(2) : '';
+}
+function facts(c) {
+  var rows = [['Type', (c.operation === 'update' ? 'Edit ' : (c.operation === 'delete' || c.operation === 'void') ? 'Void/delete ' : 'New ') + esc(c.kind || 'change')]];
+  if (c.counterparty_name) rows.push([c.counterparty_kind === 'vendor' ? 'Vendor' : 'Customer', esc(c.counterparty_name)]);
+  rows.push(['Company', esc($('#co').textContent || 'QuickBooks')]);
+  rows.push(['Requested by', esc(c.requested_by_name || c.requested_by)]);
+  if (c.before && c.before.DocNumber) rows.push(['Document', 'No. ' + esc(c.before.DocNumber) + (c.before.TxnDate ? ' · ' + esc(c.before.TxnDate) : '')]);
+  return '<div class="facts">' + rows.map(function (r) {
+    return '<div class="fact"><span style="color:var(--label)">' + r[0] + '</span><span>' + r[1] + '</span></div>'; }).join('')
+    + '<div class="fact amt"><span>Amount</span><span>' + money(c.amount) + '</span></div></div>';
+}
+/** Open a dialog; resolves with the submitted values or null on cancel. */
+function dialog(o) {
+  return new Promise(function (resolve) {
+    var veil = document.createElement('div'); veil.className = 'veil';
+    veil.innerHTML = '<div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlgT">'
+      + '<h2 id="dlgT">' + esc(o.title) + '</h2>' + (o.sub ? '<p class="sub">' + o.sub + '</p>' : '')
+      + (o.body || '') + '<div class="err" id="dlgErr" hidden></div>'
+      + '<div class="foot"><button class="btn" data-x="cancel">Cancel</button>'
+      + '<button class="btn ' + (o.danger ? 'danger' : 'primary') + '" data-x="ok" id="dlgOk">' + esc(o.ok) + '</button></div></div>';
+    document.body.appendChild(veil);
+    var okBtn = veil.querySelector('#dlgOk');
+    function close(v) { document.removeEventListener('keydown', onKey); veil.remove(); resolve(v); }
+    function onKey(e) { if (e.key === 'Escape') close(null); }
+    document.addEventListener('keydown', onKey);
+    veil.addEventListener('click', function (e) { if (e.target === veil) close(null); });
+    veil.querySelector('[data-x=cancel]').onclick = function () { close(null); };
+    var check = function () { var v = o.validate ? o.validate(veil) : null; okBtn.disabled = !!v; return v; };
+    veil.addEventListener('input', check); check();
+    okBtn.onclick = async function () {
+      var vals = o.collect ? o.collect(veil) : {};
+      okBtn.disabled = true; okBtn.textContent = 'Working…';
+      try { await o.submit(vals); close(vals); }
+      catch (err) {
+        var el = veil.querySelector('#dlgErr'); el.textContent = err.message; el.hidden = false;
+        okBtn.disabled = false; okBtn.textContent = o.ok;
+      }
+    };
+    var first = veil.querySelector('input, textarea'); if (first) first.focus(); else okBtn.focus();
+  });
+}
+async function decide(args) {
+  var r = await platform('quickbooks_change_decide', args);
+  if (!r.ok) { var e = new Error(r.error || 'That did not go through.'); e.code = r.code; throw e; }
+  return r;
+}
+function approveDialog(c) {
+  var isFinal = (c.approvals_received + 1) >= c.required_approvals;
+  var expected = Number(c.amount).toFixed(2);
+  return dialog({
+    title: isFinal ? 'Approve and send to QuickBooks' : 'Record your approval',
+    sub: isFinal ? 'This is the final approval. Approving sends the change to QuickBooks now.'
+                 : 'This change needs ' + c.required_approvals + ' approvals. Yours will be ' + (c.approvals_received + 1) + ' of ' + c.required_approvals + '.',
+    ok: isFinal ? 'Approve and send' : 'Approve',
+    body: facts(c)
+      + ((c.validation && c.validation.warnings && c.validation.warnings.length)
+          ? '<div class="strip warn"><b>Check before approving</b>' + c.validation.warnings.map(function (w) { return '<div>• ' + esc(w) + '</div>'; }).join('') + '</div>' : '')
+      + (c.high_risk
+          ? '<label for="dlgAmt">Type the amount to confirm: ' + esc(expected) + '</label>'
+            + '<input id="dlgAmt" inputmode="decimal" placeholder="' + esc(expected) + '" autocomplete="off">'
+            + '<div class="hint" id="dlgAmtHint">High-risk changes need the amount typed back before they can be approved.</div>'
+          : '')
+      + '<label for="dlgNote">Note (optional)</label><textarea id="dlgNote" rows="2" maxlength="500"></textarea>'
+      + '<div class="hint">Recorded with your approval.</div>',
+    validate: function (v) {
+      if (!c.high_risk) return null;
+      var t = v.querySelector('#dlgAmt').value, h = v.querySelector('#dlgAmtHint');
+      var ok = normalizeAmount(t) === expected;
+      h.textContent = (t && !ok) ? 'That does not match the amount.' : 'High-risk changes need the amount typed back before they can be approved.';
+      h.style.color = (t && !ok) ? 'var(--out)' : '';
+      return ok ? null : 'amount';
+    },
+    collect: function (v) { return { confirmed_amount: c.high_risk ? v.querySelector('#dlgAmt').value : undefined,
+                                     note: v.querySelector('#dlgNote').value.trim() || undefined }; },
+    submit: function (vals) { return decide({ change_id: c.id, decision: 'approve', confirmed_amount: vals.confirmed_amount, note: vals.note }); },
+  });
+}
+function rejectDialog(c) {
+  return dialog({
+    title: 'Turn down this change',
+    sub: esc(c.summary) + ' — ' + money(c.amount) + '. Nothing will be sent to QuickBooks.',
+    ok: 'Turn down', danger: true,
+    body: '<label for="dlgReason">Reason</label><textarea id="dlgReason" rows="3" maxlength="1000" placeholder="e.g. Wrong customer — this should be billed to Acme Holdings."></textarea>'
+      + '<div class="hint">Shared with whoever requested this, and recorded.</div>',
+    validate: function (v) { return v.querySelector('#dlgReason').value.trim().length >= 3 ? null : 'reason'; },
+    collect: function (v) { return { reason: v.querySelector('#dlgReason').value.trim() }; },
+    submit: function (vals) { return decide({ change_id: c.id, decision: 'reject', reason: vals.reason }); },
+  });
+}
+function cancelDialog(c) {
+  return dialog({ title: 'Cancel this request?', sub: 'Nothing has been sent to QuickBooks.', ok: 'Cancel request', danger: true,
+                  submit: function () { return decide({ change_id: c.id, decision: 'cancel' }); } });
+}
+function retryDialog(c) {
+  var unknown = c.last_execution && c.last_execution.status === 'INDETERMINATE';
+  return dialog({
+    title: 'Send to QuickBooks again?',
+    sub: unknown ? 'The last attempt\'s outcome was unknown. Eesa will first look in QuickBooks for the document, and only send again if it is not there.'
+                 : 'The last attempt failed: ' + esc((c.last_execution && c.last_execution.error) || c.status_reason || '') + '. The same approved change is sent again.',
+    ok: 'Try again', body: facts(c),
+    submit: function () { return decide({ change_id: c.id, decision: 'retry' }); },
+  });
+}
 $('#tab-approvals').addEventListener('click', async function (e) {
   var b = e.target.closest('button[data-act]');
   if (!b || b.disabled) return;
@@ -941,34 +1079,19 @@ $('#tab-approvals').addEventListener('click', async function (e) {
   var all = (QUEUE.waiting_on_me || []).concat(QUEUE.my_requests || []);
   var c = all.filter(function (x) { return x.id === id; })[0];
   if (!c) return;
-  var args = { change_id: id, decision: act };
-  if (act === 'approve') {
-    // Approving is the moment money moves: restate it, and for a high-risk
-    // change make the person type the amount — typing the figure forces them
-    // to read it, which is the failure a policy engine cannot catch.
-    var msg = 'Approve and send to QuickBooks?\n\n' + c.summary + '\n' + money(c.amount);
-    if (c.high_risk) {
-      var typed = prompt(msg + '\n\nThis is a high-risk change. Type the amount to confirm: ' + money(c.amount));
-      if (typed === null) return;
-      args.confirmed_amount = typed;
-    } else if (!confirm(msg)) return;
-  } else if (act === 'reject') {
-    var reason = prompt('Why is this being turned down? The reason goes to the person who asked.\n\n' + c.summary);
-    if (reason === null) return;
-    args.reason = reason;
-  } else if (act === 'cancel') {
-    if (!confirm('Cancel this request? Nothing has been sent to QuickBooks.')) return;
+  var open = { approve: approveDialog, reject: rejectDialog, cancel: cancelDialog, retry: retryDialog }[act];
+  if (!open) return;
+  var done;
+  try { done = await open(c); }
+  catch (err) {
+    // The expected outcomes of a race, said as what they are.
+    if (err.code === 'already_executed') alert('Someone else approved this first. It has already been sent.');
+    else if (err.code === 'changed_since') alert('This changed in QuickBooks since it was proposed. Ask for it again.');
+    else alert(err.message);
   }
-  b.disabled = true;
-  try {
-    var r = await platform('quickbooks_change_decide', args);
-    if (!r.ok) throw new Error(r.error || 'That did not go through.');
-    await loadApprovals();
-    if (act === 'approve') pollChange(id);
-  } catch (err) {
-    alert(err.message);
-    b.disabled = false;
-  }
+  if (!done) return;
+  await loadApprovals();
+  if (act === 'approve' || act === 'retry') pollChange(id);
 });
 /** After the final approval the worker sends it; watch the card settle. */
 async function pollChange(id) {
@@ -977,7 +1100,8 @@ async function pollChange(id) {
     var st = await platform('quickbooks_change_status', { change_id: id });
     if (!st.ok) return;
     var s = st.change.status;
-    if (s !== 'APPROVED' && s !== 'EXECUTING') { await loadApprovals(); return; }
+    if (s !== 'APPROVED' && s !== 'EXECUTING' && s !== 'FAILED') { await loadApprovals(); return; }
+    if (s === 'FAILED' && i > 1) { await loadApprovals(); return; }
   }
 }
 
